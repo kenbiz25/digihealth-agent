@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Digi-Health AI Agent</title>
+<link rel="icon" type="image/png" href="/public/LOGO.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #2B2FA8;
+    --secondary: #3DBFAA;
+    --accent: #EDA882;
+    --purple: #7B5BB0;
+    --bg: #F5F6FA;
+    --card: #FFFFFF;
+    --text: #1A1A2E;
+    --muted: #6B7280;
+    --border: #E0E4EF;
+    --success: #3DBFAA;
+    --warning: #F0A060;
+    --error: #E74C3C;
+    --pending: #A0A8C0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* Header */
+  header {
+    background: var(--primary);
+    color: white;
+    padding: 0 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+    border-bottom: 2px solid #1e2290;
+    position: sticky; top: 0; z-index: 100;
+  }
+  header h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  header h1 span { color: var(--secondary); }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--secondary); }
+  .next-run { font-size: 11px; color: rgba(255,255,255,0.6); font-weight: 500; }
+
+  /* Layout */
+  .app-layout {
+    display: flex; align-items: flex-start; gap: 18px;
+    max-width: 1440px; margin: 0 auto; padding: 20px 20px 20px 18px;
+  }
+  .main-content { flex: 1; min-width: 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 205px; min-width: 205px; flex-shrink: 0;
+    position: sticky; top: 56px;
+    height: calc(100vh - 56px);
+    overflow-y: auto; overflow-x: hidden;
+    padding-bottom: 24px;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .sb-section {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 7px; padding: 12px 11px; margin-bottom: 10px;
+  }
+  .sb-title {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.8px; color: var(--muted); margin-bottom: 8px;
+  }
+  .sb-stat {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 8px; border-radius: 5px; cursor: pointer;
+    transition: background 0.12s; margin-bottom: 3px;
+  }
+  .sb-stat:hover { background: var(--bg); }
+  .sb-stat-value { font-size: 19px; font-weight: 800; color: var(--primary); letter-spacing: -0.5px; }
+  .sb-stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; text-align: right; max-width: 80px; line-height: 1.3; }
+  .sb-tier { font-size: 9px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 7px 0 3px; }
+  .sb-btn {
+    display: block; width: 100%; text-align: left;
+    padding: 5px 9px; margin-bottom: 3px;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--bg); color: var(--text);
+    font-size: 11.5px; font-weight: 500; cursor: pointer;
+    transition: all 0.12s; font-family: 'Inter', sans-serif;
+  }
+  .sb-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+  .sb-btn.active { background: var(--primary); color: white; border-color: var(--primary); font-weight: 700; }
+  .sb-btn.clear { background: transparent; border-style: dashed; color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .sb-btn.clear:hover { background: var(--bg); color: var(--text); border-style: solid; }
+  .sb-btn.imp-critical { border-color:#FCA5A5; color: var(--impact-critical); }
+  .sb-btn.imp-high     { border-color:#FCD9B6; color: var(--impact-high); }
+  .sb-btn.imp-medium   { border-color:#C7D2FE; color: var(--impact-medium); }
+  .sb-btn.imp-critical.active { background: var(--impact-critical); color: white; border-color: var(--impact-critical); }
+  .sb-btn.imp-high.active     { background: var(--impact-high);     color: white; border-color: var(--impact-high); }
+  .sb-btn.imp-medium.active   { background: var(--impact-medium);   color: white; border-color: var(--impact-medium); }
+  .sb-action {
+    display: block; width: 100%; padding: 7px 10px; margin-bottom: 6px;
+    border: 1px solid var(--border); border-radius: 5px;
+    background: var(--bg); color: var(--text);
+    font-size: 11.5px; font-weight: 600; cursor: pointer;
+    text-align: center; font-family: 'Inter', sans-serif; transition: all 0.12s;
+  }
+  .sb-action:hover { border-color: var(--primary); color: var(--primary); }
+  .sb-action.primary { background: var(--primary); color: white; border-color: var(--primary); }
+  .sb-action.primary:hover { background: #22269a; }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border-radius: 6px;
+    padding: 20px;
+    border: 1px solid var(--border);
+  }
+  .card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-title { font-size: 14px; font-weight: 700; color: var(--primary); letter-spacing: -0.1px; }
+  .card-subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; font-weight: 400; }
+
+  /* Stat boxes */
+  .stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-box {
+    background: var(--card);
+    border-radius: 6px;
+    padding: 18px 16px; text-align: center;
+    border: 1px solid var(--border);
+  }
+  .stat-value { font-size: 26px; font-weight: 800; color: var(--primary); letter-spacing: -1px; }
+  .stat-label { font-size: 11px; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+
+  /* Buttons */
+  .btn {
+    padding: 9px 18px; border: none; border-radius: 5px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: background 0.15s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: #22269a; }
+  .btn-success { background: var(--secondary); color: white; }
+  .btn-success:hover { background: #30a896; }
+  .btn-danger { background: var(--error); color: white; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Pipeline Flow */
+  .pipeline-flow {
+    display: flex; align-items: center; gap: 0;
+    overflow-x: auto; padding: 8px 0;
+  }
+  .pipeline-step {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 100px; position: relative;
+  }
+  .pipeline-step:not(:last-child)::after {
+    content: ''; position: absolute;
+    top: 20px; right: -24px;
+    width: 48px; height: 2px;
+    background: var(--border);
+    z-index: 1;
+  }
+  .pipeline-step.completed::after { background: var(--success); }
+  .pipeline-step.running::after { background: var(--warning); }
+  .step-icon {
+    width: 40px; height: 40px; border-radius: 5px;
+    background: var(--border); color: var(--muted);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; margin-bottom: 6px; position: relative; z-index: 2;
+    transition: background 0.2s, color 0.2s;
+    font-weight: 700; font-family: 'Inter', sans-serif;
+  }
+  .step-icon.pending { background: var(--border); color: var(--muted); }
+  .step-icon.running { background: var(--warning); color: white; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step-icon.completed { background: var(--success); color: white; }
+  .step-icon.failed { background: var(--error); color: white; }
+  .step-label { font-size: 11px; color: var(--muted); text-align: center; font-weight: 600; letter-spacing: 0.2px; }
+  .step-tokens { font-size: 10px; color: var(--secondary); margin-top: 2px; font-weight: 600; }
+
+  /* Log */
+  .log-container {
+    background: #111827; border-radius: 5px;
+    padding: 14px; height: 260px; overflow-y: auto;
+    font-family: 'Courier New', monospace; font-size: 12px;
+    border: 1px solid #2a3347;
+  }
+  .log-entry { margin-bottom: 4px; line-height: 1.5; }
+  .log-entry .ts { color: #5D6D7E; margin-right: 8px; }
+  .log-entry.scraper .msg { color: #5DADE2; }
+  .log-entry.verifier .msg { color: #A9CCE3; }
+  .log-entry.enricher .msg { color: #A9DFBF; }
+  .log-entry.writer .msg { color: #FAD7A0; }
+  .log-entry.pdf_generator .msg { color: #F1948A; }
+  .log-entry.email_sender .msg { color: #C39BD3; }
+  .log-entry.pipeline .msg { color: #F9E79F; font-weight: bold; }
+  .log-entry.system .msg { color: #ABB2B9; }
+  .log-entry.request .msg { color: #82E0AA; }
+  .log-entry.failed .msg { color: var(--error); }
+
+  /* Run history */
+  .run-list { max-height: 300px; overflow-y: auto; }
+  .run-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .run-item:hover { background: var(--bg); }
+  .run-item:last-child { border-bottom: none; }
+  .run-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge-completed { background: #D5F5E3; color: var(--success); }
+  .badge-running { background: #FDEBD0; color: var(--warning); }
+  .badge-failed { background: #FADBD8; color: var(--error); }
+  .badge-pending { background: #EAECEE; color: var(--muted); }
+
+  /* Articles */
+  .article-item {
+    padding: 12px; border-bottom: 1px solid var(--border);
+    cursor: pointer; transition: background 0.15s;
+  }
+  .article-item:hover { background: #F8FAFB; }
+  .article-title { font-size: 13px; font-weight: 600; color: var(--primary); margin-bottom: 4px; }
+  .article-meta { font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+  .score-bar { width: 60px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 4px; }
+  .score-fill { height: 100%; border-radius: 3px; }
+
+  /* Model selector */
+  .model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .model-option {
+    border: 2px solid var(--border); border-radius: 8px;
+    padding: 12px; cursor: pointer; transition: all 0.2s;
+  }
+  .model-option:hover { border-color: var(--primary); }
+  .model-option.selected { border-color: var(--secondary); background: #F0FFF4; }
+  .model-name { font-size: 13px; font-weight: 700; color: var(--primary); }
+  .model-desc { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .model-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--secondary); color: white; display: inline-block; margin-top: 4px; }
+  .model-tag.recommended { background: var(--secondary); }
+  .model-tag.powerful { background: var(--primary); }
+  .model-tag.fast { background: var(--warning); }
+
+  /* Request section */
+  .request-box { display: flex; gap: 10px; margin-top: 12px; }
+  .request-input {
+    flex: 1; padding: 10px 14px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 13px; outline: none; resize: none;
+  }
+  .request-input:focus { border-color: var(--primary); }
+  .request-history { max-height: 200px; overflow-y: auto; }
+  .request-item {
+    background: #F8FAFB; border-radius: 8px; padding: 10px;
+    margin-bottom: 8px; border-left: 3px solid var(--primary);
+  }
+  .request-q { font-size: 12px; font-weight: 600; color: var(--primary); }
+  .request-a { font-size: 12px; color: var(--text); margin-top: 4px; white-space: pre-wrap; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 16px; }
+  .tab {
+    padding: 10px 20px; font-size: 13px; font-weight: 600;
+    cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent;
+    margin-bottom: -2px; transition: all 0.2s;
+  }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Inline form */
+  .form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; }
+  .form-group label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+  select, input[type=text], input[type=number], textarea {
+    padding: 8px 12px; border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; outline: none;
+  }
+  select:focus, input:focus, textarea:focus { border-color: var(--primary); }
+
+  /* Responsive */
+  @media(max-width: 900px) {
+    .stat-grid { grid-template-columns: repeat(2,1fr); }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .model-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .empty-state { text-align: center; padding: 32px; color: var(--muted); font-size: 13px; }
+  .empty-icon { font-size: 32px; margin-bottom: 8px; }
+  .section-gap { margin-bottom: 20px; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 600; background: var(--bg); color: var(--text); border: 1px solid var(--border); margin: 2px; }
+
+  /* ── Impact colour system ───────────────────────────── */
+  :root {
+    --impact-critical: #DC2626;
+    --impact-high:     #EA580C;
+    --impact-medium:   #2B2FA8;
+    --impact-low:      #6B7280;
+  }
+  .impact-badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; }
+  .impact-badge.critical { background:#FEE2E2; color:var(--impact-critical); }
+  .impact-badge.high     { background:#FFEDD5; color:var(--impact-high);     }
+  .impact-badge.medium   { background:#EEF2FF; color:var(--impact-medium);   }
+  .impact-badge.low      { background:#F3F4F6; color:var(--impact-low);      }
+
+  /* ── Executive Pulse section ───────────────────────── */
+  .pulse-section { background:var(--card); border-radius:6px; border:1px solid var(--border); padding:20px; margin-bottom:20px; }
+  .pulse-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+  .pulse-title { font-size:15px; font-weight:800; color:var(--primary); letter-spacing:-0.2px; }
+  .pulse-subtitle { font-size:11px; color:var(--muted); margin-top:2px; font-weight:400; }
+  .impact-dist-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:20px; }
+  .impact-dist-box { border-radius:6px; padding:14px 10px; text-align:center; border-left:4px solid; }
+  .dist-count { font-size:24px; font-weight:800; letter-spacing:-1px; }
+  .dist-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.6px; margin-top:3px; }
+  .impact-bar-wrap { display:flex; height:7px; border-radius:4px; overflow:hidden; gap:2px; margin-bottom:12px; }
+  .impact-bar-seg { height:100%; border-radius:2px; transition:width 0.4s ease; }
+  .alert-card { border-left:4px solid var(--impact-critical); background:#FEF2F2; border-radius:0 5px 5px 0; padding:12px 14px; margin-bottom:8px; }
+  .alert-card.high { border-left-color:var(--impact-high); background:#FFF7ED; }
+  .alert-headline { font-size:13px; font-weight:700; color:var(--text); margin-bottom:4px; line-height:1.4; }
+  .alert-rationale { font-size:11px; color:var(--muted); line-height:1.5; margin-bottom:6px; }
+  .alert-action { font-size:11px; font-weight:700; }
+  .action-list { display:flex; flex-direction:column; gap:6px; }
+  .action-item { display:flex; align-items:flex-start; gap:10px; padding:9px 10px; background:var(--bg); border-radius:5px; font-size:12px; }
+  .action-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; margin-top:3px; }
+</style>
+</head>
+<body>
+
+<header style="justify-content:space-between;position:relative">
+  <!-- Left: title + schedule -->
+  <div style="display:flex;align-items:center;gap:12px;min-width:200px">
+    <div>
+      <h1>Digi-Health <span>AI</span> Agent</h1>
+      <div class="next-run" id="next-run">Next: loading...</div>
+    </div>
+  </div>
+
+  <!-- Centre: MDT Main Logo -->
+  <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center">
+    <img src="/public/MDT Main Logo.png" alt="Medtronic Labs"
+      style="height:36px;width:auto;object-fit:contain"
+      onerror="this.style.display='none'">
+  </div>
+
+  <div class="header-right">
+    <div class="status-dot" id="ws-dot" title="WebSocket status"></div>
+    <span style="font-size:12px;color:#AED6F1" id="ws-status">Connecting...</span>
+    <select id="header-country-filter"
+      onchange="const p=document.getElementById('run-country-filter');if(p)p.value=this.value;"
+      style="padding:5px 8px;border:1px solid rgba(255,255,255,0.3);border-radius:6px;font-size:12px;background:rgba(255,255,255,0.1);color:white;outline:none">
+      <option value="">All Countries</option>
+      <optgroup label="Tier 1" style="color:#93C5FD">
+        <option value="Sierra Leone">Sierra Leone</option>
+        <option value="Bangladesh">Bangladesh</option>
+      </optgroup>
+      <optgroup label="Tier 2" style="color:#6EE7B7">
+        <option value="Kenya">Kenya</option>
+        <option value="Rwanda">Rwanda</option>
+        <option value="Ghana">Ghana</option>
+        <option value="India">India</option>
+      </optgroup>
+      <optgroup label="Tier 3" style="color:#FCA5A5">
+        <option value="Saudi Arabia">Saudi Arabia</option>
+        <option value="Tanzania">Tanzania</option>
+        <option value="Bhutan">Bhutan</option>
+      </optgroup>
+    </select>
+    <button class="btn btn-success btn-sm" id="btn-run" onclick="triggerRun()">
+      ▶ Run Now
+    </button>
+  </div>
+</header>
+
+<div class="app-layout">
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<nav class="sidebar">
+
+  <!-- Overview stats -->
+  <div class="sb-section">
+    <div class="sb-title">Overview</div>
+    <div class="sb-stat" onclick="switchTab('runs')" title="View run history">
+      <div class="sb-stat-value" id="stat-runs">—</div>
+      <div class="sb-stat-label">Total Runs</div>
+    </div>
+    <div class="sb-stat" onclick="switchTab('articles')" title="View articles">
+      <div class="sb-stat-value" id="stat-articles">—</div>
+      <div class="sb-stat-label">Articles Verified</div>
+    </div>
+    <div class="sb-stat" onclick="switchTab('models')" title="AI models">
+      <div class="sb-stat-value" id="stat-provider">Claude</div>
+      <div class="sb-stat-label">AI Provider</div>
+    </div>
+    <div class="sb-stat" onclick="switchTab('pipeline')" title="Pipeline schedule">
+      <div class="sb-stat-value" id="stat-schedule">07:00</div>
+      <div class="sb-stat-label">Daily Schedule</div>
+    </div>
+  </div>
+
+  <!-- Country filter -->
+  <div class="sb-section">
+    <div class="sb-title">Filter by Country</div>
+    <div class="sb-tier">Tier 1</div>
+    <button class="sb-btn" id="sbf-country-Sierra Leone"   onclick="applySidebarFilter('country','Sierra Leone')">Sierra Leone</button>
+    <button class="sb-btn" id="sbf-country-Bangladesh"     onclick="applySidebarFilter('country','Bangladesh')">Bangladesh</button>
+    <div class="sb-tier">Tier 2</div>
+    <button class="sb-btn" id="sbf-country-Kenya"          onclick="applySidebarFilter('country','Kenya')">Kenya</button>
+    <button class="sb-btn" id="sbf-country-Rwanda"         onclick="applySidebarFilter('country','Rwanda')">Rwanda</button>
+    <button class="sb-btn" id="sbf-country-Ghana"          onclick="applySidebarFilter('country','Ghana')">Ghana</button>
+    <button class="sb-btn" id="sbf-country-India"          onclick="applySidebarFilter('country','India')">India</button>
+    <div class="sb-tier">Tier 3</div>
+    <button class="sb-btn" id="sbf-country-Saudi Arabia"   onclick="applySidebarFilter('country','Saudi Arabia')">Saudi Arabia</button>
+    <button class="sb-btn" id="sbf-country-Tanzania"       onclick="applySidebarFilter('country','Tanzania')">Tanzania</button>
+    <button class="sb-btn" id="sbf-country-Bhutan"         onclick="applySidebarFilter('country','Bhutan')">Bhutan</button>
+    <button class="sb-btn clear"                           onclick="applySidebarFilter('country','')">All Countries</button>
+  </div>
+
+  <!-- Impact filter -->
+  <div class="sb-section">
+    <div class="sb-title">Filter by Impact</div>
+    <button class="sb-btn imp-critical" id="sbf-impact-critical" onclick="applySidebarFilter('impact','critical')">● Critical</button>
+    <button class="sb-btn imp-high"     id="sbf-impact-high"     onclick="applySidebarFilter('impact','high')">● High</button>
+    <button class="sb-btn imp-medium"   id="sbf-impact-medium"   onclick="applySidebarFilter('impact','medium')">● Medium</button>
+    <button class="sb-btn"              id="sbf-impact-low"      onclick="applySidebarFilter('impact','low')">● Low</button>
+    <button class="sb-btn clear"                                 onclick="applySidebarFilter('impact','')">All Levels</button>
+  </div>
+
+  <!-- Source filter -->
+  <div class="sb-section">
+    <div class="sb-title">Filter by Source</div>
+    <button class="sb-btn" id="sbf-source-twitter"  onclick="applySidebarFilter('source','twitter')">Twitter / X</button>
+    <button class="sb-btn" id="sbf-source-linkedin" onclick="applySidebarFilter('source','linkedin')">LinkedIn</button>
+    <button class="sb-btn" id="sbf-source-web"      onclick="applySidebarFilter('source','web')">Web</button>
+    <button class="sb-btn" id="sbf-source-news"     onclick="applySidebarFilter('source','news')">News</button>
+    <button class="sb-btn clear"                    onclick="applySidebarFilter('source','')">All Sources</button>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="sb-section">
+    <div class="sb-title">Quick Actions</div>
+    <button class="sb-action" onclick="viewLatestBrief()">👁 View Latest Brief</button>
+    <button class="sb-action primary" onclick="triggerRun()">▶ Run Pipeline</button>
+    <button class="sb-action" onclick="loadArticles();switchTab('articles')">↻ Refresh Articles</button>
+  </div>
+
+</nav>
+<!-- ═══════════════ MAIN CONTENT ═══════════════ -->
+<div class="main-content">
+
+  <!-- ── Executive Pulse ──────────────────────────────────────────── -->
+  <div class="pulse-section section-gap">
+    <div class="pulse-header">
+      <div>
+        <div class="pulse-title">Executive Pulse</div>
+        <div class="pulse-subtitle" id="pulse-date">Loading latest intelligence...</div>
+      </div>
+      <button onclick="loadExecutiveSummary()" class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)">Refresh</button>
+    </div>
+
+    <!-- Impact distribution bar + boxes -->
+    <div style="margin-bottom:4px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Impact Distribution — This Week</div>
+      <div class="impact-bar-wrap" id="impact-bar"></div>
+      <div class="impact-dist-grid" id="impact-dist-grid"></div>
+    </div>
+
+    <!-- Two-column: Alerts | Actions -->
+    <div class="grid-2">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--impact-critical);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Critical Alerts</div>
+        <div id="critical-alerts"><div style="font-size:12px;color:var(--muted);padding:8px">No critical items yet</div></div>
+        <div style="font-size:11px;font-weight:700;color:var(--impact-high);text-transform:uppercase;letter-spacing:0.6px;margin:14px 0 8px">High Priority</div>
+        <div id="high-priority-alerts"><div style="font-size:12px;color:var(--muted);padding:8px">No high-priority items yet</div></div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Recommended Actions</div>
+        <div class="action-list" id="recommended-actions"><div style="font-size:12px;color:var(--muted);padding:8px">No actions yet — run the pipeline to generate intelligence</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Tabs -->
+  <div class="card section-gap">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('articles')">Articles</div>
+      <div class="tab" onclick="switchTab('pipeline')">Pipeline</div>
+      <div class="tab" onclick="switchTab('runs')">Run History</div>
+      <div class="tab" onclick="switchTab('search')">Custom Search</div>
+      <div class="tab" onclick="switchTab('models')">AI Models</div>
+      <div class="tab" onclick="switchTab('request')">Request / Edit</div>
+    </div>
+
+    <!-- Pipeline Tab -->
+    <div id="tab-pipeline" class="tab-content">
+      <div class="card-header" style="border:none;padding:0 0 12px;">
+        <div>
+          <div class="card-title">Agent Pipeline Flow</div>
+          <div class="card-subtitle">Real-time status of each AI agent step</div>
+        </div>
+        <div id="pipeline-status-badge"></div>
+      </div>
+
+      <!-- Pipeline Steps Visual -->
+      <div class="pipeline-flow" id="pipeline-flow">
+        <!-- Steps injected by JS -->
+      </div>
+
+      <div style="height:16px"></div>
+
+      <!-- Live Log -->
+      <div class="card-header" style="border:none;padding:8px 0 8px;">
+        <div class="card-title" style="font-size:13px">Live Agent Log</div>
+        <button onclick="clearLog()" class="btn btn-sm" style="background:var(--bg);color:var(--muted);border:1px solid var(--border)">Clear</button>
+      </div>
+      <div class="log-container" id="log-container">
+        <div class="log-entry system">
+          <span class="ts">—</span>
+          <span class="msg">Waiting for agent activity...</span>
+        </div>
+      </div>
+
+      <!-- Run Options -->
+      <div style="margin-top:16px">
+        <div class="card-title" style="font-size:13px;margin-bottom:10px">Run Options</div>
+        <div class="form-row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group">
+            <label>Country Scope</label>
+            <select id="run-country-filter"
+              style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px"
+              onchange="syncHeaderCountry(this.value)">
+              <option value="">All Countries (Full Run)</option>
+              <optgroup label="Tier 1 — Priority">
+                <option value="Sierra Leone">Sierra Leone</option>
+                <option value="Bangladesh">Bangladesh</option>
+              </optgroup>
+              <optgroup label="Tier 2">
+                <option value="Kenya">Kenya</option>
+                <option value="Rwanda">Rwanda</option>
+                <option value="Ghana">Ghana</option>
+                <option value="India">India</option>
+              </optgroup>
+              <optgroup label="Tier 3">
+                <option value="Saudi Arabia">Saudi Arabia</option>
+                <option value="Tanzania">Tanzania</option>
+                <option value="Bhutan">Bhutan</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Extra Instructions</label>
+            <input type="text" id="extra-instructions" placeholder="e.g. Focus on telemedicine funding" style="width:280px"/>
+          </div>
+          <button class="btn btn-primary" id="btn-run-2" onclick="triggerRun()">
+            ▶ Trigger Run Now
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Run History Tab -->
+    <div id="tab-runs" class="tab-content">
+      <div class="card-header" style="border:none;padding:0 0 12px;">
+        <div class="card-title">Run History</div>
+        <button onclick="loadRuns()" class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)">Refresh</button>
+      </div>
+      <div class="run-list" id="run-list">
+        <div class="empty-state"><div class="empty-icon">📋</div>No runs yet</div>
+      </div>
+
+      <!-- Run Detail -->
+      <div id="run-detail" style="display:none;margin-top:16px">
+        <hr style="margin-bottom:16px;border-color:var(--border)">
+        <div class="card-title" style="margin-bottom:12px" id="run-detail-title">Run Detail</div>
+        <div id="run-steps-visual" class="pipeline-flow" style="margin-bottom:16px"></div>
+        <div id="run-articles-list" class="run-list"></div>
+        <div style="margin-top:12px;display:flex;gap:10px" id="run-actions"></div>
+      </div>
+    </div>
+
+    <!-- Articles Tab -->
+    <div id="tab-articles" class="tab-content active">
+      <div style="padding-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div class="card-title">Verified Articles</div>
+          <button onclick="loadArticles()" class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)">Refresh</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <input id="article-search" type="text" placeholder="Search title, source, summary..."
+            style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none"
+            oninput="loadArticles()">
+          <select id="impact-filter" onchange="loadArticles()"
+            style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+            <option value="">All Impact Levels</option>
+            <option value="critical" style="color:#DC2626;font-weight:700">Critical</option>
+            <option value="high" style="color:#EA580C;font-weight:700">High</option>
+            <option value="medium" style="color:#2B2FA8">Medium</option>
+            <option value="low" style="color:#6B7280">Low</option>
+          </select>
+          <select id="source-filter" onchange="loadArticles()"
+            style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+            <option value="">All Sources</option>
+            <option value="twitter">Twitter/X</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="web">Web/News</option>
+          </select>
+          <select id="country-filter" onchange="loadArticles()"
+            style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+            <option value="">All Countries</option>
+            <optgroup label="Tier 1 — Priority">
+              <option>Sierra Leone</option>
+              <option>Bangladesh</option>
+            </optgroup>
+            <optgroup label="Tier 2">
+              <option>Kenya</option>
+              <option>Rwanda</option>
+              <option>Ghana</option>
+              <option>India</option>
+            </optgroup>
+            <optgroup label="Tier 3">
+              <option>Saudi Arabia</option>
+              <option>Tanzania</option>
+              <option>Bhutan</option>
+            </optgroup>
+          </select>
+          <label style="font-size:12px;color:var(--muted);white-space:nowrap">From
+            <input id="date-from" type="date" onchange="loadArticles()"
+              style="margin-left:4px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          </label>
+          <label style="font-size:12px;color:var(--muted);white-space:nowrap">To
+            <input id="date-to" type="date" onchange="loadArticles()"
+              style="margin-left:4px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+          </label>
+          <button onclick="clearArticleFilters()" class="btn btn-sm"
+            style="background:var(--bg);border:1px solid var(--border);color:var(--muted)">Clear</button>
+        </div>
+      </div>
+      <div id="article-list" style="max-height:480px;overflow-y:auto">
+        <div class="empty-state"><div class="empty-icon">📰</div>No articles yet. Run the pipeline to collect news.</div>
+      </div>
+    </div>
+
+    <!-- Custom Search Tab -->
+    <div id="tab-search" class="tab-content">
+      <div class="card-header" style="border:none;padding:0 0 12px;">
+        <div>
+          <div class="card-title">Custom Search</div>
+          <div class="card-subtitle">Search any topic or description using the same AI-powered pipeline</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input id="custom-search-input" type="text"
+          placeholder="e.g. 'AI diagnostics Sierra Leone', 'telemedicine Bangladesh', 'Rwanda digital health policy 2025'..."
+          style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none"
+          onkeydown="if(event.key==='Enter')runCustomSearch()">
+        <select id="custom-search-days" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+          <option value="7">Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+        <button class="btn btn-primary" id="btn-custom-search" onclick="runCustomSearch()">Search</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+        <span style="font-size:11px;color:var(--muted);align-self:center">Quick topics:</span>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickSearch('digital health Sierra Leone Bangladesh policy 2025')">SL &amp; Bangladesh</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickSearch('mHealth funding Kenya Rwanda Ghana India')">Kenya/Rwanda/Ghana/India</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickSearch('telemedicine Saudi Arabia Tanzania Bhutan')">Saudi/Tanzania/Bhutan</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickSearch('Ministry of Health digital health announcement Sierra Leone Bangladesh Kenya Rwanda Ghana India Saudi Arabia Tanzania Bhutan')">MoH announcements</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickSearch('AI diagnostics mHealth implementation Kenya Bangladesh Rwanda')">AI diagnostics</button>
+      </div>
+      <div id="custom-search-results">
+        <div class="empty-state"><div class="empty-icon">🔍</div>Enter a topic above to search</div>
+      </div>
+    </div>
+
+    <!-- Models Tab -->
+    <div id="tab-models" class="tab-content">
+      <div class="card-header" style="border:none;padding:0 0 12px;">
+        <div class="card-title">AI Model Configuration</div>
+        <div class="card-subtitle">Choose the right model for each agent</div>
+      </div>
+
+      <!-- Provider Selection -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--primary)">AI Provider</div>
+        <div style="display:flex;gap:12px">
+          <div class="model-option selected" id="provider-claude" onclick="selectProvider('claude')" style="flex:1">
+            <div class="model-name">Anthropic Claude</div>
+            <div class="model-desc">Best reasoning, long-context, excellent for analysis</div>
+            <span class="model-tag recommended">Recommended</span>
+          </div>
+          <div class="model-option" id="provider-openai" onclick="selectProvider('openai')" style="flex:1">
+            <div class="model-name">OpenAI GPT</div>
+            <div class="model-desc">Good alternative, widely supported</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model Tiers -->
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--primary)">Claude Models</div>
+      <div class="model-grid" id="claude-models">
+        <div class="model-option selected" onclick="selectModel('balanced')">
+          <div class="model-name">Sonnet 4.6 (Balanced) ✓</div>
+          <div class="model-desc">claude-sonnet-4-6 — Best overall for news analysis, fast and capable</div>
+          <span class="model-tag recommended">Best Choice</span>
+        </div>
+        <div class="model-option" onclick="selectModel('powerful')">
+          <div class="model-name">Opus 4.6 (Powerful)</div>
+          <div class="model-desc">claude-opus-4-6 — Use for verifier agent, best reasoning</div>
+          <span class="model-tag powerful">Most Capable</span>
+        </div>
+        <div class="model-option" onclick="selectModel('fast')">
+          <div class="model-name">Haiku 4.5 (Fast)</div>
+          <div class="model-desc">claude-haiku-4-5 — Cheapest, use for scraper pre-filtering</div>
+          <span class="model-tag fast">Cheapest</span>
+        </div>
+      </div>
+
+      <div style="margin-top:20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--primary)">Agent Role Recommendations</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <tr style="background:var(--primary);color:white">
+            <th style="padding:8px;text-align:left">Agent</th>
+            <th style="padding:8px;text-align:left">Role</th>
+            <th style="padding:8px;text-align:left">Recommended Model</th>
+            <th style="padding:8px;text-align:left">Why</th>
+          </tr>
+          <tr style="background:var(--bg)">
+            <td style="padding:8px;font-weight:600">Scraper</td>
+            <td style="padding:8px">Collect &amp; filter news</td>
+            <td style="padding:8px"><span class="chip">Haiku / Sonnet</span></td>
+            <td style="padding:8px;color:var(--muted)">High volume, needs speed</td>
+          </tr>
+          <tr>
+            <td style="padding:8px;font-weight:600">Verifier</td>
+            <td style="padding:8px">Fact-check &amp; triangulate</td>
+            <td style="padding:8px"><span class="chip" style="background:#EBF5FB;color:var(--primary)">Opus 4.6</span></td>
+            <td style="padding:8px;color:var(--muted)">Needs deep reasoning</td>
+          </tr>
+          <tr style="background:var(--bg)">
+            <td style="padding:8px;font-weight:600">Enricher</td>
+            <td style="padding:8px">Add context &amp; links</td>
+            <td style="padding:8px"><span class="chip">Sonnet 4.6</span></td>
+            <td style="padding:8px;color:var(--muted)">Balance of quality &amp; cost</td>
+          </tr>
+          <tr>
+            <td style="padding:8px;font-weight:600">Writer</td>
+            <td style="padding:8px">Write the report</td>
+            <td style="padding:8px"><span class="chip">Sonnet 4.6</span></td>
+            <td style="padding:8px;color:var(--muted)">Excellent writing quality</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Request / Edit Tab -->
+    <div id="tab-request" class="tab-content">
+      <div class="card-header" style="border:none;padding:0 0 12px;">
+        <div class="card-title">Request & Edit Content</div>
+        <div class="card-subtitle">Ask the AI to modify, expand, or re-focus the report</div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px">TARGET RUN</label>
+        <select id="request-run-select" style="width:100%">
+          <option value="">— Select a completed run —</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px">YOUR REQUEST</label>
+        <textarea id="request-text" class="request-input" rows="3"
+          placeholder="e.g. 'Add more detail on Sierra Leone', 'Make the executive summary shorter', 'Focus on Bangladesh telemedicine funding', 'List all startups mentioned'"></textarea>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted);align-self:center">Quick:</span>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickRequest('Expand the telemedicine section with more detail')">Expand telemedicine</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickRequest('Add more focus on Sierra Leone and Bangladesh news')">Focus SL &amp; Bangladesh</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickRequest('List all funding and investment news')">List funding news</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickRequest('Make the executive summary shorter and punchier')">Shorten summary</button>
+        <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="quickRequest('Add a risk analysis section')">Add risk analysis</button>
+      </div>
+
+      <button class="btn btn-primary" onclick="submitRequest()">Submit Request</button>
+
+      <div style="margin-top:20px">
+        <div class="card-title" style="font-size:13px;margin-bottom:10px">Request History</div>
+        <div class="request-history" id="request-history">
+          <div class="empty-state" style="padding:16px"><div class="empty-icon">💬</div>No requests yet</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end card -->
+
+  <!-- Bottom Grid: Articles + Quick Actions -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Latest Verified News</div>
+          <div class="card-subtitle">From the most recent pipeline run</div>
+        </div>
+        <a href="/api/articles" target="_blank" class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)">JSON</a>
+      </div>
+      <div id="latest-articles" style="max-height:320px;overflow-y:auto">
+        <div class="empty-state"><div class="empty-icon">📰</div>No articles yet</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Quick Actions & Info</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="background:var(--bg);border-radius:6px;padding:14px;font-size:12px">
+          <div style="font-weight:700;color:var(--primary);margin-bottom:10px;font-size:13px">Pipeline Steps</div>
+          <div id="pipeline-steps-desc" style="display:flex;flex-direction:column;gap:8px"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="window.open('/docs','_blank')">API Docs</button>
+          <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="window.open('/api/status','_blank')">System Status</button>
+          <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="loadRuns()">Refresh Runs</button>
+          <button class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)" onclick="loadArticles()">Refresh Articles</button>
+        </div>
+        <div id="last-pdf-link" style="display:none;gap:8px;flex-wrap:wrap">
+          <button id="pdf-view-link" onclick="viewLatestBrief()"
+            class="btn btn-success btn-sm">👁 View Latest Brief</button>
+          <a id="pdf-download-link" class="btn btn-sm" href="#" target="_blank"
+            style="background:var(--bg);border:1px solid var(--border)">⬇ Download PDF</a>
+        </div>
+        <div style="background:#EBF5FB;border-radius:8px;padding:12px;font-size:11px;color:var(--primary)">
+          <b>API Key Status:</b><br>
+          <div id="key-status" style="margin-top:6px;display:flex;flex-direction:column;gap:3px">
+            <span style="color:var(--muted)">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end main-content -->
+</div><!-- end app-layout -->
+
+<script>
+const API = '';
+let ws = null;
+let selectedProvider = 'claude';
+let selectedModel = 'balanced';
+let currentRunId = null;
+
+const STEP_INFO = {
+  scraper: {
+    label: 'Scraper',
+    desc: 'Collects news from web, MoH sites, Twitter & LinkedIn',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+  },
+  verifier: {
+    label: 'Verifier',
+    desc: 'Cross-references sources and fact-checks each article',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>`,
+  },
+  enricher: {
+    label: 'Enricher',
+    desc: 'Adds categories, country tags and follow-up links',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`,
+  },
+  impact: {
+    label: 'Impact',
+    desc: 'Classifies articles as critical / high / medium / low for executive action',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>`,
+  },
+  writer: {
+    label: 'Writer',
+    desc: 'Composes the weekly intelligence brief',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
+  },
+  pdf_generator: {
+    label: 'PDF',
+    desc: 'Generates a formatted PDF report',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`,
+  },
+  email_sender: {
+    label: 'Email',
+    desc: 'Sends brief to recipients (Monday scheduled runs only)',
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>`,
+  },
+};
+
+// ── Init ──────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  initPipelineFlow();
+  initPipelineDesc();
+  connectWS();
+  loadStatus();
+  loadRuns();
+  loadArticles();
+  loadExecutiveSummary();
+});
+
+function initPipelineDesc() {
+  const el = document.getElementById('pipeline-steps-desc');
+  if (!el) return;
+  el.innerHTML = Object.entries(STEP_INFO).map(([, info]) => `
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="flex-shrink:0;width:30px;height:30px;border-radius:5px;background:var(--primary);color:white;display:flex;align-items:center;justify-content:center">
+        ${info.icon}
+      </div>
+      <div>
+        <span style="font-weight:700;color:var(--text);font-size:12px">${info.label}</span>
+        <span style="color:var(--muted);font-size:12px"> — ${info.desc || ''}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function initPipelineFlow() {
+  const flow = document.getElementById('pipeline-flow');
+  flow.innerHTML = '';
+  Object.entries(STEP_INFO).forEach(([key, info]) => {
+    const div = document.createElement('div');
+    div.className = 'pipeline-step';
+    div.id = `step-${key}`;
+    div.innerHTML = `
+      <div class="step-icon pending" id="icon-${key}">${info.icon}</div>
+      <div class="step-label">${info.label}</div>
+      <div class="step-tokens" id="tokens-${key}"></div>
+    `;
+    flow.appendChild(div);
+  });
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('ws-status').textContent = 'Live';
+    document.getElementById('ws-dot').style.background = '#2ECC71';
+    setInterval(() => ws && ws.readyState === 1 && ws.send(JSON.stringify({type:'ping'})), 25000);
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    handleWSMessage(data);
+  };
+
+  ws.onclose = () => {
+    document.getElementById('ws-status').textContent = 'Reconnecting...';
+    document.getElementById('ws-dot').style.background = '#E74C3C';
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function handleWSMessage(data) {
+  const { step, status, message, data: extra, run_id } = data;
+  if (run_id) currentRunId = run_id;
+
+  // Log it
+  appendLog(step, message, status);
+
+  // Update pipeline step
+  if (step && STEP_INFO[step]) {
+    updateStep(step, status || 'running');
+    if (extra?.tokens_used) {
+      const el = document.getElementById(`tokens-${step}`);
+      if (el) el.textContent = `${extra.tokens_used}t`;
+    }
+  }
+
+  // Pipeline complete
+  if (step === 'pipeline' && status === 'completed') {
+    document.getElementById('btn-run').disabled = false;
+    document.getElementById('btn-run').innerHTML = '▶ Run Now';
+    document.getElementById('btn-run-2').disabled = false;
+    document.getElementById('btn-run-2').innerHTML = '▶ Trigger Run Now';
+    if (extra?.pdf_path) {
+      const linkEl = document.getElementById('last-pdf-link');
+      const aEl = document.getElementById('pdf-download-link');
+      linkEl.style.display = 'flex';
+      if (currentRunId) aEl.href = `/api/runs/${currentRunId}/pdf?inline=false`;
+    }
+    loadStatus();
+    loadRuns();
+    loadArticles();
+    loadExecutiveSummary();
+    setBadge('completed');
+  }
+
+  if (step === 'pipeline' && status === 'failed') {
+    document.getElementById('btn-run').disabled = false;
+    document.getElementById('btn-run').innerHTML = '▶ Run Now';
+    document.getElementById('btn-run-2').disabled = false;
+    document.getElementById('btn-run-2').innerHTML = '▶ Trigger Run Now';
+    setBadge('failed');
+  }
+
+  // Live article updates during pipeline
+  if (step === 'articles_updated') {
+    loadArticles();
+    return;
+  }
+
+  // Request response
+  if (step === 'request' && status === 'completed' && extra) {
+    appendRequestResponse(extra);
+    loadRequests();
+  }
+}
+
+function updateStep(step, status) {
+  const icon = document.getElementById(`icon-${step}`);
+  const stepEl = document.getElementById(`step-${step}`);
+  if (!icon || !stepEl) return;
+  icon.className = `step-icon ${status}`;
+  stepEl.className = `pipeline-step ${status}`;
+}
+
+function resetPipeline() {
+  Object.keys(STEP_INFO).forEach(k => updateStep(k, 'pending'));
+  document.getElementById('pipeline-status-badge').innerHTML = '';
+  Object.keys(STEP_INFO).forEach(k => {
+    const el = document.getElementById(`tokens-${k}`);
+    if (el) el.textContent = '';
+  });
+}
+
+function setBadge(status) {
+  const colors = { completed: '#D5F5E3', failed: '#FADBD8', running: '#FDEBD0' };
+  const texts = { completed: '✅ Completed', failed: '❌ Failed', running: '⚙️ Running' };
+  const el = document.getElementById('pipeline-status-badge');
+  el.innerHTML = `<span style="background:${colors[status]};padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600">${texts[status]||status}</span>`;
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────
+function appendLog(step, message, status) {
+  const log = document.getElementById('log-container');
+  const ts = new Date().toLocaleTimeString();
+  const cls = status === 'failed' ? 'failed' : (step || 'system');
+  const div = document.createElement('div');
+  div.className = `log-entry ${cls}`;
+  div.innerHTML = `<span class="ts">${ts}</span><span class="msg">[${(step||'system').toUpperCase()}] ${message||''}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-container').innerHTML = '';
+}
+
+// ── API Calls ─────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    document.getElementById('stat-provider').textContent = data.ai_provider?.toUpperCase() || 'Claude';
+    document.getElementById('stat-schedule').textContent = data.schedule?.split(' ')[0] || '07:00';
+    document.getElementById('next-run').textContent = `Next: ${data.next_run || 'Not scheduled'}`;
+    if (data.last_run?.pdf_path) {
+      const linkEl = document.getElementById('last-pdf-link');
+      const aEl = document.getElementById('pdf-download-link');
+      linkEl.style.display = 'flex';
+      if (data.last_run.run_id) aEl.href = `/api/runs/${data.last_run.run_id}/pdf?inline=false`;
+    }
+    // Show key status (boolean only — never the actual key values)
+    if (data.keys_configured) {
+      const KEY_LABELS = {
+        anthropic: 'ANTHROPIC_API_KEY (required)',
+        tavily:    'TAVILY_API_KEY (required)',
+        twitter:   'TWITTER_BEARER_TOKEN (optional)',
+        openai:    'OPENAI_API_KEY (optional)',
+        smtp:      'SMTP_PASSWORD (optional)',
+      };
+      document.getElementById('key-status').innerHTML = Object.entries(KEY_LABELS).map(([k, label]) => {
+        const ok = data.keys_configured[k];
+        return `<span style="color:${ok ? 'var(--success)' : '#E74C3C'}">${ok ? '✓' : '✗'} ${label}</span>`;
+      }).join('');
+    }
+  } catch(e) {}
+}
+
+function syncHeaderCountry(val) {
+  const hdr = document.getElementById('header-country-filter');
+  if (hdr) hdr.value = val;
+}
+
+async function triggerRun() {
+  const instructions   = document.getElementById('extra-instructions')?.value || '';
+  // Read country from either the pipeline-tab dropdown or the header dropdown (whichever changed last)
+  const countryPanel   = document.getElementById('run-country-filter')?.value || '';
+  const countryHeader  = document.getElementById('header-country-filter')?.value || '';
+  const countryFilter  = countryPanel || countryHeader || '';
+
+  const btn1 = document.getElementById('btn-run');
+  const btn2 = document.getElementById('btn-run-2');
+  const scopeLabel = countryFilter ? ` — ${countryFilter}` : '';
+  btn1.disabled = true;
+  btn1.innerHTML = `<span class="spinner"></span> Running${scopeLabel}...`;
+  btn2.disabled = true;
+  btn2.innerHTML = `<span class="spinner"></span> Running${scopeLabel}...`;
+
+  resetPipeline();
+  setBadge('running');
+  appendLog('pipeline', `Manual run triggered${scopeLabel}...`, 'running');
+
+  try {
+    await fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        extra_instructions: instructions,
+        ai_provider: selectedProvider,
+        model_tier: selectedModel,
+        country_filter: countryFilter,
+      }),
+    });
+  } catch(e) {
+    appendLog('pipeline', `Failed to start: ${e.message}`, 'failed');
+    btn1.disabled = false; btn1.innerHTML = '▶ Run Now';
+    btn2.disabled = false; btn2.innerHTML = '▶ Trigger Run Now';
+  }
+}
+
+async function loadRuns() {
+  try {
+    const r = await fetch('/api/runs?limit=20');
+    const runs = await r.json();
+    document.getElementById('stat-runs').textContent = runs.length;
+
+    const select = document.getElementById('request-run-select');
+    const current = select.value;
+    select.innerHTML = '<option value="">— Select a completed run —</option>';
+    runs.filter(r => r.status === 'completed').forEach(run => {
+      const opt = document.createElement('option');
+      opt.value = run.run_id;
+      opt.textContent = `${run.started_at?.split('T')[0]} — ${run.run_id.split('-')[0]}`;
+      select.appendChild(opt);
+    });
+    if (current) select.value = current;
+
+    const list = document.getElementById('run-list');
+    if (!runs.length) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>No runs yet</div>';
+      return;
+    }
+    list.innerHTML = runs.map(run => `
+      <div class="run-item" onclick="loadRunDetail('${run.run_id}')">
+        <div>
+          <div style="font-size:13px;font-weight:600">${run.started_at?.replace('T',' ').split('.')[0] || '—'}</div>
+          <div style="font-size:11px;color:var(--muted)">${run.trigger} · ${run.run_id.split('-')[0]} · ${run.ai_provider||'claude'}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${run.pdf_path ? `
+            <button onclick="event.stopPropagation();openPdfViewer('/api/runs/${run.run_id}/pdf?inline=true','Brief — ${run.run_id.split('-')[0]}')"
+              class="btn btn-sm" title="View in browser"
+              style="background:var(--primary);color:white;border:none;padding:4px 8px;font-size:11px">👁 View</button>
+            <a href="/api/runs/${run.run_id}/pdf?inline=false" target="_blank" onclick="event.stopPropagation()"
+              class="btn btn-sm" title="Download PDF"
+              style="background:var(--bg);border:1px solid var(--border);padding:4px 8px;font-size:11px;text-decoration:none">⬇ PDF</a>
+          ` : ''}
+          <span class="run-badge badge-${run.status}">${run.status}</span>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+async function loadRunDetail(runId) {
+  currentRunId = runId;
+  try {
+    const r = await fetch(`/api/runs/${runId}`);
+    const data = await r.json();
+    document.getElementById('run-detail').style.display = 'block';
+    document.getElementById('run-detail-title').textContent = `Run: ${runId.split('-')[0]} — ${data.run.status}`;
+
+    // Steps visual
+    const stepsEl = document.getElementById('run-steps-visual');
+    stepsEl.innerHTML = '';
+    data.steps.forEach(s => {
+      const info = STEP_INFO[s.step_name] || { icon: `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`, label: s.step_name };
+      const div = document.createElement('div');
+      div.className = `pipeline-step ${s.status}`;
+      div.innerHTML = `
+        <div class="step-icon ${s.status}">${info.icon}</div>
+        <div class="step-label">${info.label}</div>
+        <div class="step-tokens">${s.tokens_used ? s.tokens_used+'t' : ''}</div>
+      `;
+      stepsEl.appendChild(div);
+    });
+
+    // Articles
+    const artEl = document.getElementById('run-articles-list');
+    artEl.innerHTML = data.articles.length ? data.articles.slice(0,15).map(a => articleHTML(a)).join('') :
+      '<div class="empty-state" style="padding:12px">No articles</div>';
+
+    // Actions
+    const actEl = document.getElementById('run-actions');
+    actEl.innerHTML = data.run.pdf_path ? `
+      <button onclick="openPdfViewer('/api/runs/${runId}/pdf?inline=true','Intelligence Brief')"
+        class="btn btn-success btn-sm">👁 View Brief</button>
+      <a href="/api/runs/${runId}/pdf?inline=false" target="_blank"
+        class="btn btn-sm" style="background:var(--bg);border:1px solid var(--border)">⬇ Download PDF</a>
+    ` : '';
+  } catch(e) {}
+}
+
+const IMPACT_COLORS = {
+  critical: '#DC2626',
+  high:     '#EA580C',
+  medium:   '#2B2FA8',
+  low:      '#6B7280',
+};
+
+function clearArticleFilters() {
+  document.getElementById('article-search').value = '';
+  document.getElementById('source-filter').value = '';
+  document.getElementById('impact-filter').value = '';
+  document.getElementById('country-filter').value = '';
+  document.getElementById('date-from').value = '';
+  document.getElementById('date-to').value = '';
+  loadArticles();
+}
+
+async function loadExecutiveSummary() {
+  try {
+    const r = await fetch('/api/executive-summary');
+    const data = await r.json();
+
+    // Date subtitle
+    const dateEl = document.getElementById('pulse-date');
+    if (data.run_date) {
+      const d = new Date(data.run_date);
+      dateEl.textContent = `Week of ${d.toLocaleDateString('en-GB', {day:'numeric',month:'long',year:'numeric'})} · ${data.total_articles} articles analysed`;
+    } else {
+      dateEl.textContent = 'No completed run yet — trigger the pipeline to generate intelligence';
+      return;
+    }
+
+    // Distribution bar
+    const total = data.total_articles || 1;
+    const dist  = data.impact_distribution || {};
+    document.getElementById('impact-bar').innerHTML = ['critical','high','medium','low'].map(lvl => {
+      const pct = Math.round((dist[lvl] || 0) / total * 100);
+      return pct ? `<div class="impact-bar-seg" style="width:${pct}%;background:${IMPACT_COLORS[lvl]}" title="${lvl}: ${dist[lvl]}"></div>` : '';
+    }).join('');
+
+    // Distribution boxes
+    const labels = {critical:'Critical', high:'High', medium:'Medium', low:'Low'};
+    document.getElementById('impact-dist-grid').innerHTML = ['critical','high','medium','low'].map(lvl => `
+      <div class="impact-dist-box" style="border-left-color:${IMPACT_COLORS[lvl]};background:${IMPACT_COLORS[lvl]}12">
+        <div class="dist-count" style="color:${IMPACT_COLORS[lvl]}">${dist[lvl] || 0}</div>
+        <div class="dist-label" style="color:${IMPACT_COLORS[lvl]}">${labels[lvl]}</div>
+      </div>`).join('');
+
+    // Critical alerts
+    document.getElementById('critical-alerts').innerHTML = (data.critical_alerts || []).length
+      ? data.critical_alerts.map(a => `
+          <div class="alert-card">
+            <div class="alert-headline"><a href="${a.url}" target="_blank" style="color:var(--text);text-decoration:none">${a.executive_headline || a.title}</a></div>
+            ${a.impact_rationale ? `<div class="alert-rationale">${a.impact_rationale}</div>` : ''}
+            ${a.recommended_action ? `<div class="alert-action" style="color:var(--impact-critical)">→ ${a.recommended_action}</div>` : ''}
+          </div>`).join('')
+      : '<div style="font-size:12px;color:var(--muted);padding:8px">No critical items this week</div>';
+
+    // High priority
+    document.getElementById('high-priority-alerts').innerHTML = (data.high_priority || []).length
+      ? data.high_priority.map(a => `
+          <div class="alert-card high">
+            <div class="alert-headline"><a href="${a.url}" target="_blank" style="color:var(--text);text-decoration:none">${a.executive_headline || a.title}</a></div>
+            ${a.impact_rationale ? `<div class="alert-rationale">${a.impact_rationale.slice(0,150)}...</div>` : ''}
+            ${a.recommended_action ? `<div class="alert-action" style="color:var(--impact-high)">→ ${a.recommended_action}</div>` : ''}
+          </div>`).join('')
+      : '<div style="font-size:12px;color:var(--muted);padding:8px">No high-priority items this week</div>';
+
+    // Recommended actions
+    document.getElementById('recommended-actions').innerHTML = (data.recommended_actions || []).length
+      ? `<div class="action-list">${data.recommended_actions.map(item => `
+          <div class="action-item">
+            <div class="action-dot" style="background:${IMPACT_COLORS[item.impact_level]}"></div>
+            <div>
+              <div style="font-weight:600;color:var(--text);font-size:12px">${item.action}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">
+                <a href="${item.url}" target="_blank" style="color:var(--muted);text-decoration:none">${(item.article_title||'').slice(0,70)}...</a>
+              </div>
+            </div>
+          </div>`).join('')}</div>`
+      : '<div style="font-size:12px;color:var(--muted);padding:8px">No actionable items identified yet</div>';
+
+  } catch(e) {
+    const el = document.getElementById('pulse-date');
+    if (el) el.textContent = 'Could not load executive summary';
+  }
+}
+
+async function loadArticles() {
+  const source   = document.getElementById('source-filter')?.value || '';
+  const search   = document.getElementById('article-search')?.value.trim() || '';
+  const dateFrom = document.getElementById('date-from')?.value || '';
+  const dateTo   = document.getElementById('date-to')?.value || '';
+  const impact   = document.getElementById('impact-filter')?.value || '';
+  const country  = document.getElementById('country-filter')?.value || '';
+  const params = new URLSearchParams({ limit: 50 });
+  if (source)   params.set('source', source);
+  if (search)   params.set('search', search);
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo)   params.set('date_to', dateTo);
+  if (impact)   params.set('impact_level', impact);
+  if (country)  params.set('country', country);
+  try {
+    const r = await fetch(`/api/articles?${params}`);
+    const articles = await r.json();
+    document.getElementById('stat-articles').textContent = articles.length;
+
+    // Articles tab — table view
+    const tableEl = document.getElementById('article-list');
+    if (tableEl) {
+      if (articles.length) {
+        tableEl.innerHTML = `
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:var(--bg);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted)">
+                <th style="padding:8px 12px;text-align:left;font-weight:600">Title</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600;white-space:nowrap">Countries</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600;white-space:nowrap">Date Published</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600;white-space:nowrap">Date Scraped</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600">Source</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600">Credibility</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600">Link</th>
+              </tr>
+            </thead>
+            <tbody>${articles.map(a => articleTableRow(a)).join('')}</tbody>
+          </table>`;
+      } else {
+        tableEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div>No articles yet. Run the pipeline to collect news.</div>';
+      }
+    }
+
+    // Dashboard latest news — card view (unchanged)
+    const latestEl = document.getElementById('latest-articles');
+    if (latestEl) {
+      latestEl.innerHTML = articles.length
+        ? articles.slice(0, 8).map(a => articleHTML(a)).join('')
+        : '<div class="empty-state"><div class="empty-icon">📰</div>No articles yet</div>';
+    }
+  } catch(e) {}
+}
+
+async function runCustomSearch() {
+  const query = document.getElementById('custom-search-input').value.trim();
+  if (!query) return;
+  const days = parseInt(document.getElementById('custom-search-days').value);
+  const btn = document.getElementById('btn-custom-search');
+  const resultsEl = document.getElementById('custom-search-results');
+  btn.disabled = true;
+  btn.textContent = 'Searching...';
+  resultsEl.innerHTML = '<div class="empty-state">Searching and analysing results with AI...</div>';
+  try {
+    const r = await fetch('/api/custom-search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ query, days }),
+    });
+    const articles = await r.json();
+    if (articles.length) {
+      resultsEl.innerHTML = `
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${articles.length} results for: <strong>${query}</strong></div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--bg);font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted)">
+              <th style="padding:8px 12px;text-align:left;font-weight:600">Title</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:600;white-space:nowrap">Published</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:600">Source</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:600">Relevance</th>
+              <th style="padding:8px 12px;text-align:left;font-weight:600">Link</th>
+            </tr>
+          </thead>
+          <tbody>${articles.map(a => {
+            const score = a.relevance_score || 0;
+            const pct = Math.round(score * 100);
+            const color = score > 0.7 ? '#3DBFAA' : score > 0.5 ? '#F0A060' : '#E74C3C';
+            const pub = (a.published_at || '').slice(0, 10) || '—';
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:10px 12px;font-size:13px;font-weight:500;max-width:320px">
+                <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${a.title || 'Untitled'}</div>
+                ${a.summary ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${(a.summary||'').slice(0,100)}...</div>` : ''}
+              </td>
+              <td style="padding:10px 12px;font-size:12px;color:var(--muted);white-space:nowrap">${pub}</td>
+              <td style="padding:10px 12px;font-size:12px;white-space:nowrap">${a.source_name || '—'}</td>
+              <td style="padding:10px 12px;white-space:nowrap">
+                <span style="background:${color}20;color:${color};padding:3px 8px;border-radius:12px;font-size:11px;font-weight:700">${pct}%</span>
+              </td>
+              <td style="padding:10px 12px">
+                <a href="${a.url}" target="_blank" style="color:var(--primary);font-size:12px;font-weight:600;text-decoration:none">Open ↗</a>
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`;
+    } else {
+      resultsEl.innerHTML = '<div class="empty-state">No relevant results found. Try a different query.</div>';
+    }
+  } catch(e) {
+    resultsEl.innerHTML = '<div class="empty-state" style="color:var(--error)">Search failed. Check your connection.</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+function quickSearch(q) {
+  document.getElementById('custom-search-input').value = q;
+  runCustomSearch();
+}
+
+function articleHTML(a) {
+  // Card format — dashboard "Latest Verified News" widget
+  const level = a.impact_level || '';
+  const impactColor = IMPACT_COLORS[level] || 'var(--border)';
+  const score = a.verification_score || 0;
+  const pct = Math.round(score * 100);
+  const credColor = score > 0.7 ? '#3DBFAA' : score > 0.5 ? '#F0A060' : '#E74C3C';
+  const sourceIcon = { twitter: '🐦', linkedin: '💼', web: '🌐' }[a.source] || '🌐';
+  return `
+    <div class="article-item" style="border-left:3px solid ${impactColor}" onclick="window.open('${a.url}','_blank')">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap">
+        ${level ? `<span class="impact-badge ${level}">${level}</span>` : ''}
+        <div class="article-title" style="margin:0">${a.executive_headline || a.title || 'Untitled'}</div>
+      </div>
+      <div class="article-meta">
+        <span>${sourceIcon} ${a.source_name || a.source || 'web'}</span>
+        <span>Score: <span class="score-bar"><span class="score-fill" style="width:${pct}%;background:${credColor}"></span></span> ${pct}%</span>
+        ${a.category ? `<span class="chip">${a.category}</span>` : ''}
+      </div>
+      ${a.recommended_action ? `<div style="font-size:11px;color:${impactColor};margin-top:5px;font-weight:700">→ ${a.recommended_action}</div>` : ''}
+    </div>
+  `;
+}
+
+function articleTableRow(a) {
+  // Table row — Articles tab, impact-color-coded
+  const level = a.impact_level || 'low';
+  const impactColor = IMPACT_COLORS[level] || '#6B7280';
+  const score = a.verification_score || 0;
+  const pct = Math.round(score * 100);
+  const credColor = score > 0.7 ? '#3DBFAA' : score > 0.5 ? '#F0A060' : '#E74C3C';
+  const credLabel = score > 0.7 ? 'High' : score > 0.5 ? 'Med' : (score > 0 ? 'Low' : '—');
+  const sourceIcon = { twitter: '🐦', linkedin: '💼', web: '🌐' }[a.source] || '🌐';
+  const pubDate    = a.published_at ? a.published_at.slice(0, 10) : '—';
+  const scrapedDate = a.created_at  ? a.created_at.slice(0, 10)  : '—';
+  const headline   = a.executive_headline || a.title || 'Untitled';
+  const countries  = Array.isArray(a.countries_mentioned) ? a.countries_mentioned.slice(0, 3) : [];
+  const countriesHTML = countries.length
+    ? countries.map(c => `<span style="display:inline-block;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1px 7px;font-size:11px;white-space:nowrap;margin:1px">${c}</span>`).join('')
+    : '<span style="color:var(--muted);font-size:11px">—</span>';
+  return `
+    <tr style="border-bottom:1px solid var(--border);cursor:pointer;border-left:4px solid ${impactColor}"
+        onclick="window.open('${a.url}','_blank')"
+        title="${(a.impact_rationale || a.summary || '').slice(0,200)}">
+      <td style="padding:10px 12px;font-size:13px;font-weight:500;max-width:300px">
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${headline}</div>
+        <div style="display:flex;align-items:center;gap:5px;margin-top:4px;flex-wrap:wrap">
+          <span class="impact-badge ${level}">${level}</span>
+          ${a.category ? `<span class="chip">${a.category}</span>` : ''}
+        </div>
+        ${a.recommended_action ? `<div style="font-size:11px;color:${impactColor};margin-top:4px;font-weight:700">→ ${a.recommended_action}</div>` : ''}
+      </td>
+      <td style="padding:10px 12px;font-size:12px;max-width:140px">${countriesHTML}</td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--muted);white-space:nowrap">${pubDate}</td>
+      <td style="padding:10px 12px;font-size:12px;color:var(--muted);white-space:nowrap">${scrapedDate}</td>
+      <td style="padding:10px 12px;font-size:12px;white-space:nowrap">${sourceIcon} ${a.source_name || a.source || '—'}</td>
+      <td style="padding:10px 12px;white-space:nowrap">
+        <span style="background:${credColor}20;color:${credColor};padding:3px 8px;border-radius:12px;font-size:11px;font-weight:700">${credLabel} ${pct > 0 ? pct+'%' : ''}</span>
+      </td>
+      <td style="padding:10px 12px">
+        <a href="${a.url}" target="_blank" onclick="event.stopPropagation()"
+          style="color:var(--primary);font-size:12px;font-weight:600;text-decoration:none">Open ↗</a>
+      </td>
+    </tr>
+  `;
+}
+
+// ── Requests ──────────────────────────────────────────────────────────────
+async function submitRequest() {
+  const runId = document.getElementById('request-run-select').value;
+  const text = document.getElementById('request-text').value.trim();
+  if (!runId) { alert('Please select a run first.'); return; }
+  if (!text) { alert('Please enter a request.'); return; }
+
+  appendLog('request', `Submitting: ${text}`, 'running');
+  try {
+    await fetch('/api/request', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ run_id: runId, request: text }),
+    });
+    document.getElementById('request-text').value = '';
+    loadRequests(runId);
+  } catch(e) {
+    appendLog('request', `Failed: ${e.message}`, 'failed');
+  }
+}
+
+async function loadRequests(runId) {
+  runId = runId || document.getElementById('request-run-select').value;
+  if (!runId) return;
+  try {
+    const r = await fetch(`/api/requests/${runId}`);
+    const requests = await r.json();
+    const el = document.getElementById('request-history');
+    el.innerHTML = requests.length ? requests.map(req => `
+      <div class="request-item">
+        <div class="request-q">Q: ${req.request}</div>
+        ${req.response ? `<div class="request-a">${JSON.stringify(req.response, null, 2).slice(0,400)}</div>` : '<div style="font-size:11px;color:var(--muted)">Processing...</div>'}
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">${req.created_at?.split('T')[0]} · ${req.status}</div>
+      </div>
+    `).join('') : '<div class="empty-state" style="padding:16px"><div class="empty-icon">💬</div>No requests yet</div>';
+  } catch(e) {}
+}
+
+function appendRequestResponse(data) {
+  const el = document.getElementById('request-history');
+  const div = document.createElement('div');
+  div.className = 'request-item';
+  div.innerHTML = `<div class="request-a"><b>Response:</b> ${data.explanation || ''}\n\n${data.updated_content?.slice(0, 600) || ''}</div>`;
+  el.prepend(div);
+}
+
+function quickRequest(text) {
+  document.getElementById('request-text').value = text;
+}
+
+// ── Models ────────────────────────────────────────────────────────────────
+function selectProvider(p) {
+  selectedProvider = p;
+  document.querySelectorAll('[id^="provider-"]').forEach(el => el.classList.remove('selected'));
+  document.getElementById(`provider-${p}`)?.classList.add('selected');
+}
+
+function selectModel(tier) {
+  selectedModel = tier;
+  document.querySelectorAll('#claude-models .model-option').forEach(el => el.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const tabs = ['articles','pipeline','runs','search','models','request'];
+    t.classList.toggle('active', tabs[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById(`tab-${name}`)?.classList.add('active');
+  if (name === 'runs') loadRuns();
+  if (name === 'articles') loadArticles();
+  if (name === 'request') {
+    loadRuns();
+    const runId = document.getElementById('request-run-select').value;
+    if (runId) loadRequests(runId);
+  }
+}
+
+document.getElementById('request-run-select').addEventListener('change', function() {
+  if (this.value) loadRequests(this.value);
+});
+
+// ── Sidebar filter ───────────────────────────────────────────────────────────
+const _sbActive = { country: '', impact: '', source: '' };
+
+function applySidebarFilter(type, value) {
+  // Clear previous active btn in this group
+  const prev = _sbActive[type];
+  if (prev) {
+    const old = document.getElementById(`sbf-${type}-${prev}`);
+    if (old) old.classList.remove('active');
+  }
+  _sbActive[type] = value;
+
+  // Highlight new active btn
+  if (value) {
+    const btn = document.getElementById(`sbf-${type}-${value}`);
+    if (btn) btn.classList.add('active');
+  }
+
+  // Set the corresponding article-tab filter element
+  const selMap = { country: 'country-filter', impact: 'impact-filter', source: 'source-filter' };
+  const el = document.getElementById(selMap[type]);
+  if (el) el.value = value;
+
+  // Switch to articles tab and reload
+  switchTab('articles');
+  loadArticles();
+}
+
+// ── PDF Viewer Modal ──────────────────────────────────────────────────────────
+function openPdfViewer(url, title) {
+  document.getElementById('pdf-modal-title').textContent = title || 'Intelligence Brief';
+  document.getElementById('pdf-iframe').src = url;
+  document.getElementById('pdf-download-btn').href = url.replace('?inline=true','') + '?inline=false';
+  document.getElementById('pdf-modal-overlay').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closePdfViewer() {
+  document.getElementById('pdf-modal-overlay').style.display = 'none';
+  document.getElementById('pdf-iframe').src = '';
+  document.body.style.overflow = '';
+}
+
+function viewLatestBrief() {
+  openPdfViewer('/api/reports/latest/pdf?inline=true', 'Latest Intelligence Brief');
+}
+
+// close on overlay click
+document.getElementById('pdf-modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closePdfViewer();
+});
+// close on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closePdfViewer();
+});
+</script>
+
+<!-- PDF Viewer Modal -->
+<div id="pdf-modal-overlay" style="
+  display:none;position:fixed;inset:0;z-index:9999;
+  background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
+  <div style="
+    background:#fff;border-radius:12px;width:92vw;height:92vh;
+    display:flex;flex-direction:column;overflow:hidden;
+    box-shadow:0 24px 60px rgba(0,0,0,0.4);">
+    <!-- Modal header -->
+    <div style="
+      display:flex;align-items:center;justify-content:space-between;
+      padding:12px 18px;background:var(--primary);color:white;flex-shrink:0">
+      <span style="font-weight:700;font-size:14px" id="pdf-modal-title">Intelligence Brief</span>
+      <div style="display:flex;gap:10px;align-items:center">
+        <a id="pdf-download-btn" href="#" target="_blank" style="
+          background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);
+          padding:5px 12px;border-radius:6px;font-size:12px;font-weight:600;
+          text-decoration:none;cursor:pointer">
+          ⬇ Download
+        </a>
+        <button onclick="closePdfViewer()" style="
+          background:rgba(255,255,255,0.15);color:white;border:none;
+          width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:16px;
+          display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
+    </div>
+    <!-- iframe -->
+    <iframe id="pdf-iframe" src="" style="
+      flex:1;width:100%;border:none;" allow="fullscreen">
+    </iframe>
+  </div>
+</div>
+</body>
+</html>

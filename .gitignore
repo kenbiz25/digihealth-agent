@@ -1,0 +1,40 @@
+# Environment — NEVER commit these
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Database (contains scraped data, not code)
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated reports / PDFs
+reports/
+*.pdf
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
