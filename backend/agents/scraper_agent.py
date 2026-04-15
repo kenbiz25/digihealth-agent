@@ -266,14 +266,24 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
             item["_query"] = query
         all_raw.extend(result)
 
-    await emit(f"Collected {len(all_raw)} raw results. Stratifying by tier...")
+    await emit(f"Collected {len(all_raw)} raw results. Stratifying per country...")
 
-    # ── Stratified sampling: bucket by tier so every tier gets AI budget ──────
-    # Without this, Tier 1's high query volume would fill the [:N] slice
-    # and Tier 3 / official / sentiment articles would never reach Claude.
-    tier1_raw, tier2_raw, tier3_raw, official_raw, sentiment_raw, country_raw, other_raw = (
-        [], [], [], [], [], [], []
-    )
+    # ── Per-country bucketing ─────────────────────────────────────────────────
+    # Each country gets its own raw-result bucket so no single country can
+    # crowd out another within the same tier.
+    per_country: dict[str, list] = {c: [] for c in TARGET_COUNTRIES}
+    official_raw:     list = []
+    sentiment_raw:    list = []
+    country_run_raw:  list = []
+    other_raw:        list = []
+
+    def _infer_country(query: str) -> str | None:
+        q = query.lower()
+        for c in TARGET_COUNTRIES:
+            if c.lower() in q:
+                return c
+        return None
+
     for i, (src_type, _query, _) in enumerate(search_tasks):
         result = results[i]
         if isinstance(result, Exception):
@@ -281,31 +291,34 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
         for item in result:
             item["_src_type"] = src_type
             item["_query"] = _query
-        if "t1" in src_type:
-            tier1_raw.extend(result)
-        elif "t2" in src_type:
-            tier2_raw.extend(result)
-        elif "t3" in src_type:
-            tier3_raw.extend(result)
-        elif src_type in ("official", "moh_site", "moh_site_serper"):
+        if src_type in ("official", "moh_site", "moh_site_serper"):
             official_raw.extend(result)
         elif src_type in ("sentiment", "linkedin_tavily", "linkedin"):
             sentiment_raw.extend(result)
         elif "country" in src_type:
-            country_raw.extend(result)
+            country_run_raw.extend(result)
         else:
-            other_raw.extend(result)
+            c = _infer_country(_query)
+            if c:
+                per_country[c].extend(result)
+            else:
+                other_raw.extend(result)
 
-    # Budget allocation: keep each bucket proportional to priority but ensure lower tiers are represented
-    stratified = (
-        tier1_raw[:15]    +   # Tier 1 — deepest (Sierra Leone, Bangladesh)
-        tier2_raw[:12]    +   # Tier 2 — broad (Kenya, Rwanda, Ghana, India)
-        tier3_raw[:10]    +   # Tier 3 — always included (Saudi Arabia, Tanzania, Bhutan)
-        official_raw[:8]  +   # Official signals — always prioritised
-        sentiment_raw[:5] +   # Social sentiment
-        country_raw[:8]   +   # Country-specific run queries
-        other_raw[:5]         # Twitter / other
-    )
+    # Per-country budgets: Tier 1 gets deepest individual coverage
+    T1_BUDGET, T2_BUDGET, T3_BUDGET = 8, 5, 4
+
+    stratified: list[dict] = []
+    for c in COUNTRIES_TIER1:
+        stratified.extend(per_country[c][:T1_BUDGET])
+    for c in COUNTRIES_TIER2:
+        stratified.extend(per_country[c][:T2_BUDGET])
+    for c in COUNTRIES_TIER3:
+        stratified.extend(per_country[c][:T3_BUDGET])
+    stratified += official_raw[:8]
+    stratified += sentiment_raw[:5]
+    stratified += country_run_raw[:8]
+    stratified += other_raw[:4]
+
     # Deduplicate within stratified set by URL
     seen_urls: set[str] = set()
     slim_input: list[dict] = []
@@ -326,8 +339,13 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
             "published_date": r.get("published_date") or r.get("date") or "",
         }
 
-    slim_raw = [slim_result(r) for r in slim_input[:55]]
-    await emit(f"Stratified to {len(slim_raw)} items (T1:{len(tier1_raw[:15])} T2:{len(tier2_raw[:12])} T3:{len(tier3_raw[:10])} Off:{len(official_raw[:8])} Sent:{len(sentiment_raw[:5])}). Running AI extraction...")
+    # Log per-country raw counts so we can see distribution
+    budget_log = " | ".join(
+        f"{c}:{len(per_country[c])}"
+        for c in TARGET_COUNTRIES if per_country[c]
+    )
+    slim_raw = [slim_result(r) for r in slim_input[:60]]
+    await emit(f"Per-country raw: {budget_log}. Sending {len(slim_raw)} items to AI...")
 
     client = get_ai_client(AI_PROVIDER)
     raw_text = json.dumps(slim_raw, indent=2)
@@ -357,61 +375,63 @@ Return JSON array. Each item: {{title, url, source, source_name, published_at, r
     articles = [a for a in articles if isinstance(a, dict) and a.get("relevance_score", 0) >= 0.5]
     articles = deduplicate(articles)
 
-    # ── Adaptive redistribution: if higher tiers have no articles, supplement lower tiers ──
-    if not country_filter:
-        tier1_countries = {"Sierra Leone", "Bangladesh"}
-        tier2_countries = {"Kenya", "Rwanda", "Ghana", "India"}
-        tier3_countries = {"Saudi Arabia", "Tanzania", "Bhutan"}
+    # ── Per-country gap check & guarantee ────────────────────────────────────
+    # Check each individual country — not just each tier — and run targeted
+    # supplemental searches for any country with zero articles.
+    # Tier 3 uses a lower relevance threshold (0.3) since coverage is thinner.
+    if not country_filter and TAVILY_API_KEY:
 
-        def countries_covered(arts: list[dict], target: set) -> set:
-            covered = set()
+        def _articles_for_country(country: str, arts: list[dict]) -> list:
+            out = []
             for a in arts:
                 mentioned = a.get("countries_mentioned") or []
                 if not mentioned:
                     text = (a.get("title", "") + " " + a.get("raw_content", "")).lower()
                     mentioned = [c for c in TARGET_COUNTRIES if c.lower() in text]
-                covered.update(set(mentioned) & target)
-            return covered
+                if country in mentioned:
+                    out.append(a)
+            return out
 
-        t1_covered = countries_covered(articles, tier1_countries)
-        t2_covered = countries_covered(articles, tier2_countries)
-        t3_covered = countries_covered(articles, tier3_countries)
+        missing_t1 = [c for c in COUNTRIES_TIER1 if not _articles_for_country(c, articles)]
+        missing_t2 = [c for c in COUNTRIES_TIER2 if not _articles_for_country(c, articles)]
+        missing_t3 = [c for c in COUNTRIES_TIER3 if not _articles_for_country(c, articles)]
+        all_missing = missing_t1 + missing_t2 + missing_t3
 
-        # Supplement tiers with zero coverage using extra targeted searches
-        supplemental_tasks = []
-        if not t1_covered and TAVILY_API_KEY:
-            await emit("Tier 1 has no articles — running supplemental Tier 1 searches...")
-            for q in SEARCH_QUERIES_TIER1[:4]:
-                supplemental_tasks.append(("supp_t1", q, search_tavily(q, "news")))
-        if not t2_covered and TAVILY_API_KEY:
-            await emit("Tier 2 has no articles — redistributing tokens to Tier 2...")
-            for q in SEARCH_QUERIES_TIER2[:4]:
-                supplemental_tasks.append(("supp_t2", q, search_tavily(q, "news")))
-        if not t3_covered and TAVILY_API_KEY:
-            await emit("Tier 3 has no articles — supplementing Tier 3 queries...")
-            for q in SEARCH_QUERIES_TIER3[:4]:
-                supplemental_tasks.append(("supp_t3", q, search_tavily(q, "news")))
+        if all_missing:
+            await emit(f"Coverage gaps detected: {all_missing}. Running targeted supplemental searches...")
+            supp_tasks = []
+            for c in all_missing:
+                cq = COUNTRY_QUERIES.get(c, {})
+                for q in cq.get("search", [f"digital health {c}"])[:2]:
+                    supp_tasks.append((c, q, search_tavily(q, "news")))
+                # Tier 3: also try general topic for broader hit
+                if c in COUNTRIES_TIER3:
+                    supp_tasks.append((c, f"{c} health technology", search_tavily(f"{c} health technology", "general")))
 
-        if supplemental_tasks:
-            supp_results = await asyncio.gather(*[t[2] for t in supplemental_tasks], return_exceptions=True)
-            supp_raw = []
-            for i, (src_type, _q, _) in enumerate(supplemental_tasks):
+            await asyncio.sleep(12)
+            supp_results = await asyncio.gather(*[t[2] for t in supp_tasks], return_exceptions=True)
+            supp_raw: list[dict] = []
+            for i, (c, q, _) in enumerate(supp_tasks):
                 res = supp_results[i]
                 if isinstance(res, Exception):
                     continue
                 for item in res:
-                    item["_src_type"] = src_type
-                supp_raw.extend(res)
+                    item["_src_type"] = "supp"
+                    item["_query"] = q
+                supp_raw.extend(res[:5])
 
             if supp_raw:
-                supp_slim = [slim_result(r) for r in supp_raw[:20]]
-                supp_prompt = f"""Supplemental search results for target countries with no coverage.
+                supp_slim = [slim_result(r) for r in supp_raw[:25]]
+                # Lower threshold hint for Tier 3 countries
+                t3_hint = f" For Tier 3 countries ({', '.join(COUNTRIES_TIER3)}), accept relevance_score >= 0.3." if missing_t3 else ""
+                supp_prompt = f"""Targeted supplemental search for countries with no coverage: {all_missing}.
 Today: {datetime.utcnow().strftime('%Y-%m-%d')}
 Results:
 {json.dumps(supp_slim, indent=2)}
 Return JSON array. Each item: {{title, url, source, source_name, published_at, raw_content, relevance_score, is_africa_focused, is_official, sentiment_signal}}
+Include any item that mentions a target country even if digital health is indirect.{t3_hint}
 """
-                await asyncio.sleep(15)  # short pause before second AI call
+                await asyncio.sleep(15)
                 supp_text, supp_tokens = call_ai(
                     client, SYSTEM_PROMPT, supp_prompt,
                     model_tier=SCRAPER_MODEL, max_tokens=2000, provider=AI_PROVIDER
@@ -419,10 +439,16 @@ Return JSON array. Each item: {{title, url, source, source_name, published_at, r
                 tokens += supp_tokens
                 try:
                     supp_articles = parse_json_response(supp_text)
-                    supp_articles = [a for a in supp_articles if isinstance(a, dict) and a.get("relevance_score", 0) >= 0.5]
+                    # Tier 3 gets lower threshold; Tier 1/2 stay at 0.4
+                    def _keep(a: dict) -> bool:
+                        score = a.get("relevance_score", 0)
+                        mentioned = a.get("countries_mentioned") or []
+                        is_t3 = any(c in mentioned for c in COUNTRIES_TIER3)
+                        return score >= (0.3 if is_t3 else 0.4)
+                    supp_articles = [a for a in supp_articles if isinstance(a, dict) and _keep(a)]
                     articles.extend(supp_articles)
                     articles = deduplicate(articles)
-                    await emit(f"Supplemental extraction added {len(supp_articles)} more articles.")
+                    await emit(f"Supplemental pass added {len(supp_articles)} articles. Gaps filled: {[c for c in all_missing if _articles_for_country(c, articles)]}")
                 except Exception:
                     pass
 
