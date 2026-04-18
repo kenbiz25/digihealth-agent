@@ -10,11 +10,14 @@ from typing import Any
 from backend.config import (
     TAVILY_API_KEY, TWITTER_BEARER_TOKEN, SERPER_API_KEY,
     SEARCH_QUERIES, SEARCH_QUERIES_TIER1, SEARCH_QUERIES_TIER2, SEARCH_QUERIES_TIER3,
-    TWITTER_QUERIES, MOH_SITE_QUERIES, OFFICIAL_QUERIES, SENTIMENT_QUERIES,
+    TWITTER_QUERIES, LINKEDIN_QUERIES, MOH_SITE_QUERIES, OFFICIAL_QUERIES, SENTIMENT_QUERIES,
     MAX_ARTICLES_PER_RUN, AI_PROVIDER, SCRAPER_MODEL, SEARCH_LOOKBACK_DAYS,
     TARGET_COUNTRIES, COUNTRIES_TIER1, COUNTRIES_TIER2, COUNTRIES_TIER3,
     COUNTRY_QUERIES, EXCLUDED_URLS,
 )
+
+# Hard cap on Tavily calls per full run — keeps usage ≤50 searches/run
+MAX_TAVILY_CALLS = 50
 from backend.agents.base_agent import get_ai_client, call_ai, parse_json_response
 
 
@@ -51,6 +54,8 @@ Coverage scope — include ALL of:
 - LinkedIn/Twitter community discussions, reactions, and sentiments about health developments
 - Conference outcomes and stakeholder meetings
 
+DEDUPLICATION RULE: If two or more items report the same announcement, event, or story (even from different websites), include ONLY the most informative version. One item per story — do not let the same news appear twice with different sources.
+
 Return a JSON array of news items. If no relevant items found, return [].
 """
 
@@ -69,6 +74,8 @@ async def search_tavily(query: str, topic: str = "general") -> list[dict]:
         "max_results": 10,
         "topic": topic,
         "days": SEARCH_LOOKBACK_DAYS,
+        # Block high-volume syndicators that republish the same AP/Reuters wire story
+        "exclude_domains": ["msn.com", "yahoo.com", "allafrica.com", "feedspot.com", "flipboard.com"],
     }
     async with httpx.AsyncClient(timeout=30) as client:
         try:
@@ -179,6 +186,7 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
     all_raw = []
     sources_searched = []
     search_tasks = []
+    _base_tavily_count = 0  # updated after full-run query assembly
 
     if country_filter:
         # ── Country-specific run: use per-country query map ─────────────────
@@ -188,9 +196,10 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
             country_filter = None
         else:
             if TAVILY_API_KEY:
+                is_t3_country = country_filter in COUNTRIES_TIER3
                 for q in cq.get("search", []):
-                    search_tasks.append(("tavily_country_general", q, search_tavily(q, "general")))
-                    search_tasks.append(("tavily_country_news",    q, search_tavily(q, "news")))
+                    topic = "general" if is_t3_country else "news"
+                    search_tasks.append(("tavily_country", q, search_tavily(q, topic)))
                 moh = cq.get("moh_site", "")
                 if moh:
                     search_tasks.append(("moh_site", moh, search_tavily(moh, "news")))
@@ -212,50 +221,55 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
                 sources_searched.append("Google Search (Serper)")
 
     if not country_filter:
-        # ── Full run: all countries, tiered priority ────────────────────────
+        # ── Full run: tiered, single-topic-per-query, capped at MAX_TAVILY_CALLS ──
+        tavily_plan: list[tuple[str, str, str]] = []  # (src_type, query, topic)
+
+        # Tier 1 — news topic (24 h–7 day fresh news)
+        for q in SEARCH_QUERIES_TIER1:
+            tavily_plan.append(("tavily_t1", q, "news"))
+        # Tier 2 — news topic
+        for q in SEARCH_QUERIES_TIER2:
+            tavily_plan.append(("tavily_t2", q, "news"))
+        # Tier 3 — general topic (broader web; lower daily news volume)
+        for q in SEARCH_QUERIES_TIER3:
+            tavily_plan.append(("tavily_t3", q, "general"))
+        # LinkedIn discussions — general topic
+        for q in LINKEDIN_QUERIES:
+            tavily_plan.append(("linkedin_tavily", q, "general"))
+        # Ministry of Health sites — news topic
+        for q in MOH_SITE_QUERIES:
+            tavily_plan.append(("moh_site", q, "news"))
+        # Official pronouncements — news topic
+        for q in OFFICIAL_QUERIES:
+            tavily_plan.append(("official", q, "news"))
+        # Social sentiment — general topic
+        for q in SENTIMENT_QUERIES:
+            tavily_plan.append(("sentiment", q, "general"))
+
+        # Enforce hard cap — trim to budget before firing any calls
+        if len(tavily_plan) > MAX_TAVILY_CALLS:
+            tavily_plan = tavily_plan[:MAX_TAVILY_CALLS]
+
         if TAVILY_API_KEY:
-            for q in SEARCH_QUERIES_TIER1:
-                search_tasks.append(("tavily_t1_general", q, search_tavily(q, "general")))
-                search_tasks.append(("tavily_t1_news",    q, search_tavily(q, "news")))
-            for q in SEARCH_QUERIES_TIER2:
-                search_tasks.append(("tavily_t2_general", q, search_tavily(q, "general")))
-                search_tasks.append(("tavily_t2_news",    q, search_tavily(q, "news")))
-            for q in SEARCH_QUERIES_TIER3:
-                search_tasks.append(("tavily_t3_general", q, search_tavily(q, "general")))
-                search_tasks.append(("tavily_t3_news",    q, search_tavily(q, "news")))
-            sources_searched.append("Tavily Web Search")
+            for src_type, q, topic in tavily_plan:
+                search_tasks.append((src_type, q, search_tavily(q, topic)))
+            sources_searched.append(f"Tavily ({len(tavily_plan)} queries, ≤{MAX_TAVILY_CALLS} cap)")
+            sources_searched.append(f"Ministry of Health Sites ({len(MOH_SITE_QUERIES)})")
+            sources_searched.append("LinkedIn + Official + Sentiment (via Tavily)")
+        elif SERPER_API_KEY:
+            for q in SEARCH_QUERIES[:8]:
+                search_tasks.append(("serper", q, search_serper(q)))
+            for q in MOH_SITE_QUERIES:
+                search_tasks.append(("moh_site_serper", q, search_serper(q)))
+            sources_searched.append("Google Search (Serper)")
 
         if TWITTER_BEARER_TOKEN:
             for q in TWITTER_QUERIES:
                 search_tasks.append(("twitter_api", q, search_twitter_api(q)))
             sources_searched.append("Twitter/X API")
 
-        if TAVILY_API_KEY:
-            linkedin_queries = [
-                "site:linkedin.com digital health Sierra Leone Bangladesh",
-                "site:linkedin.com digital health Kenya Rwanda Ghana India",
-            ]
-            for q in linkedin_queries:
-                search_tasks.append(("linkedin_tavily", q, search_tavily(q)))
-            sources_searched.append("LinkedIn (via Tavily)")
-            for q in MOH_SITE_QUERIES:
-                search_tasks.append(("moh_site", q, search_tavily(q, "news")))
-            sources_searched.append(f"Ministry of Health Sites ({len(MOH_SITE_QUERIES)} countries)")
-            for q in OFFICIAL_QUERIES:
-                search_tasks.append(("official", q, search_tavily(q, "news")))
-            sources_searched.append("Official/Ministry Pronouncements")
-            for q in SENTIMENT_QUERIES:
-                search_tasks.append(("sentiment", q, search_tavily(q, "general")))
-            sources_searched.append("Social Sentiment (LinkedIn/Twitter)")
-        elif SERPER_API_KEY:
-            for q in MOH_SITE_QUERIES:
-                search_tasks.append(("moh_site_serper", q, search_serper(q)))
-            sources_searched.append("Ministry of Health Sites via Serper")
-
-        if SERPER_API_KEY and not TAVILY_API_KEY:
-            for q in SEARCH_QUERIES[:6]:
-                search_tasks.append(("serper", q, search_serper(q)))
-            sources_searched.append("Google Search (Serper)")
+        # Track how many Tavily calls were actually queued for supplemental budget
+        _base_tavily_count = len(tavily_plan)
 
     await emit(f"Searching {len(search_tasks)} queries across {len(sources_searched)} sources...")
 
@@ -406,14 +420,17 @@ Return JSON array. Each item: {{title, url, source, source_name, published_at, r
 
         if all_missing:
             await emit(f"Coverage gaps detected: {all_missing}. Running targeted supplemental searches...")
+            supp_budget = max(0, MAX_TAVILY_CALLS - _base_tavily_count)
             supp_tasks = []
             for c in all_missing:
+                if len(supp_tasks) >= supp_budget:
+                    break
                 cq = COUNTRY_QUERIES.get(c, {})
                 for q in cq.get("search", [f"digital health {c}"])[:2]:
                     supp_tasks.append((c, q, search_tavily(q, "news")))
                 # Tier 3: also try general topic for broader hit
-                if c in COUNTRIES_TIER3:
-                    supp_tasks.append((c, f"{c} health technology", search_tavily(f"{c} health technology", "general")))
+                if c in COUNTRIES_TIER3 and len(supp_tasks) < supp_budget:
+                    supp_tasks.append((c, f"{c} health technology 2025", search_tavily(f"{c} health technology 2025", "general")))
 
             await asyncio.sleep(12)
             supp_results = await asyncio.gather(*[t[2] for t in supp_tasks], return_exceptions=True)

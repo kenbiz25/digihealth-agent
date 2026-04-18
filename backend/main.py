@@ -3,8 +3,13 @@ FastAPI Backend - REST API + WebSocket for the Digital Health Africa AI Agent.
 Run with: uvicorn backend.main:app --reload --port 8000
 """
 import asyncio
+import sys
 import json
 import os
+
+# Windows: ProactorEventLoop breaks concurrent DNS resolution — switch to Selector
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 from contextlib import asynccontextmanager
 from datetime import datetime, date
 from typing import Any, Optional

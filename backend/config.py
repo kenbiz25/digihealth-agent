@@ -41,8 +41,8 @@ SCHEDULE_MINUTE      = int(os.getenv("SCHEDULE_MINUTE", "0"))
 SCHEDULE_DAY_OF_WEEK = os.getenv("SCHEDULE_DAY_OF_WEEK", "mon")  # mon-sun, or "*" for daily
 TIMEZONE             = os.getenv("TIMEZONE", "Africa/Nairobi")
 
-# How many days back to search for articles — 1 = last 24 hrs (daily freshness guardrail)
-SEARCH_LOOKBACK_DAYS = int(os.getenv("SEARCH_LOOKBACK_DAYS", "1"))
+# How many days back to search — default 7 to match weekly schedule (override via env for daily use)
+SEARCH_LOOKBACK_DAYS = int(os.getenv("SEARCH_LOOKBACK_DAYS", "7"))
 
 # === Email ===
 EMAIL_ENABLED    = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
@@ -71,57 +71,58 @@ COUNTRIES_TIER3 = ["Saudi Arabia", "Tanzania", "Bhutan"]
 # All target countries (used for filtering/UI)
 TARGET_COUNTRIES = COUNTRIES_TIER1 + COUNTRIES_TIER2 + COUNTRIES_TIER3
 
-# === Search Queries (ordered by priority — Tier 1 first so they rank highest in raw results) ===
-# Tier 1: Sierra Leone & Bangladesh — 4 queries each
+# === Search Queries — optimised for freshness, orthogonality, and 50-call budget ===
+# Each tier uses a single Tavily topic (news / general) — no double-firing.
+# Queries are year-anchored and action-oriented to surface new events, not evergreen docs.
+
+# Tier 1: Sierra Leone & Bangladesh — 3 queries each → topic: "news"
+# Angles are orthogonal: (1) broad fresh news, (2) official/ministry, (3) implementation/deployment
 SEARCH_QUERIES_TIER1 = [
-    "digital health Sierra Leone",
-    "telemedicine mHealth Sierra Leone healthcare",
-    "Sierra Leone Ministry of Health health policy meeting",
-    "Sierra Leone health technology funding plans",
-    "digital health Bangladesh",
-    "telemedicine mHealth Bangladesh healthcare",
-    "Bangladesh Ministry of Health digital policy meeting",
-    "Bangladesh health technology eHealth plans",
+    "Sierra Leone digital health launched announced 2025",
+    "Sierra Leone Ministry of Health technology policy announcement",
+    "Sierra Leone mHealth community health workers deployed rollout",
+    "Bangladesh digital health eHealth launched 2025",
+    "Bangladesh DGHS Ministry of Health technology policy update",
+    "Bangladesh telemedicine mHealth rural healthcare rollout",
 ]
 
-# Tier 2: Kenya, Rwanda, Ghana, India — 2 queries each
+# Tier 2: Kenya, Rwanda, Ghana, India — 2 queries each → topic: "news"
+# One broad angle + one official/implementation angle per country
 SEARCH_QUERIES_TIER2 = [
-    "digital health Kenya telemedicine",
-    "Kenya Ministry of Health health policy",
-    "digital health Rwanda eHealth",
-    "Rwanda health technology policy meeting",
-    "digital health Ghana mHealth",
-    "Ghana Ministry of Health health plans",
-    "digital health India telemedicine AI",
-    "India Ministry of Health digital health policy",
+    "Kenya digital health Ministry implementation launched 2025",
+    "Kenya NHIF mHealth telemedicine health technology update",
+    "Rwanda eHealth digital health Ministry update 2025",
+    "Rwanda health technology implementation policy announcement",
+    "Ghana digital health Ministry launched announced 2025",
+    "Ghana mHealth community health workers technology policy",
+    "India Ayushman ABDM digital health launched 2025",
+    "India MOHFW telemedicine NHP health technology update",
 ]
 
-# Tier 3: Saudi Arabia, Tanzania, Bhutan — 2 queries each (general + news)
+# Tier 3: Saudi Arabia, Tanzania, Bhutan — 1 query each → topic: "general"
+# Single broad query per country; "general" topic casts wider net for lower-volume markets
 SEARCH_QUERIES_TIER3 = [
-    "digital health Saudi Arabia eHealth telemedicine",
-    "Saudi Arabia Vision 2030 health technology",
-    "digital health Tanzania mHealth policy",
-    "Tanzania health technology implementation",
-    "digital health Bhutan eHealth healthcare",
-    "Bhutan health technology policy",
+    "Saudi Arabia digital health eHealth Ministry vision 2030 2025",
+    "Tanzania digital health mHealth Ministry implementation update",
+    "Bhutan eHealth digital health Ministry healthcare announced",
 ]
 
-# Combined — used by scraper (Tier 1 searched first)
+# Combined list (Tier 1 first for priority ordering)
 SEARCH_QUERIES = SEARCH_QUERIES_TIER1 + SEARCH_QUERIES_TIER2 + SEARCH_QUERIES_TIER3
 
-# Twitter/social queries — country-specific
-TWITTER_QUERIES_TIER1 = [
-    "digital health Sierra Leone",
-    "health technology Bangladesh mHealth",
-]
-TWITTER_QUERIES_TIER2 = [
-    "digital health Kenya Rwanda",
-    "digital health Ghana India telemedicine",
-]
-TWITTER_QUERIES_TIER3 = [
+# Twitter/X API queries (if bearer token is set)
+TWITTER_QUERIES = [
+    "digital health Sierra Leone Bangladesh",
+    "digital health Kenya Rwanda Ghana India telemedicine",
     "digital health Saudi Arabia Tanzania Bhutan",
 ]
-TWITTER_QUERIES = TWITTER_QUERIES_TIER1 + TWITTER_QUERIES_TIER2 + TWITTER_QUERIES_TIER3
+
+# LinkedIn via Tavily — 3 combined → topic: "general"
+LINKEDIN_QUERIES = [
+    "site:linkedin.com digital health Sierra Leone Bangladesh 2025",
+    "site:linkedin.com digital health Kenya Rwanda Ghana India",
+    "site:linkedin.com digital health Saudi Arabia Tanzania Bhutan",
+]
 
 # === Per-country query map (used for country-specific runs) ===
 COUNTRY_QUERIES: dict[str, dict] = {
@@ -181,51 +182,31 @@ COUNTRY_QUERIES: dict[str, dict] = {
     },
 }
 
-# === Official pronouncement & social sentiment queries ===
-# Tracks minister statements, MOH announcements, LinkedIn/Twitter discussions
+# === Official pronouncement queries — 4 combined → topic: "news" ===
+# One query bundles countries per tier to avoid per-country overhead
 OFFICIAL_QUERIES = [
-    # Tier 1
-    "Sierra Leone Minister of Health digital health announcement 2025 2026",
-    "MOHS Sierra Leone health policy pronouncement implementation",
-    "Bangladesh health minister digital health statement announcement",
-    "DGHS Bangladesh eHealth mHealth implementation update",
-    # Tier 2
-    "Kenya Cabinet Secretary Health digital announcement",
-    "Kenya MOH digital health policy tools launched",
-    "Rwanda Minister of Health digital health pronouncement",
-    "Ghana Minister of Health digital health announcement implementation",
-    "India Ministry of Health digital health Ayushman policy update",
-    # Tier 3
-    "Saudi Arabia MOH digital health vision 2030 announcement",
-    "Tanzania Minister of Health digital health update",
-    "Bhutan Ministry of Health digital health update",
+    "Sierra Leone Bangladesh Minister Health digital health announced 2025",
+    "Kenya Rwanda Cabinet Secretary Health digital health launched 2025",
+    "Ghana India Ministry Health digital health implementation announced 2025",
+    "Saudi Arabia Tanzania Bhutan Ministry Health digital health update 2025",
 ]
 
+# === Social sentiment queries — 3 combined → topic: "general" ===
 SENTIMENT_QUERIES = [
-    # LinkedIn/social discussions — all tiers
-    "site:linkedin.com Sierra Leone Bangladesh digital health",
-    "site:linkedin.com Kenya Rwanda Ghana digital health discussion",
-    "site:linkedin.com India digital health implementation discussion",
-    "site:linkedin.com Saudi Arabia Tanzania Bhutan digital health",
-    # Twitter/community discussions — all tiers
-    "digital health Sierra Leone community reaction discussion",
-    "digital health Bangladesh mHealth stakeholder sentiment",
-    "digital health Kenya Rwanda Ghana stakeholder discussion",
-    "digital health India telemedicine community sentiment",
-    "digital health Saudi Arabia Tanzania Bhutan discussion",
+    "digital health Sierra Leone Bangladesh stakeholder reaction discussion 2025",
+    "digital health Kenya Rwanda Ghana India stakeholder discussion 2025",
+    "digital health Saudi Arabia Tanzania Bhutan reaction discussion 2025",
 ]
 
-# === Ministry of Health site-specific queries ===
+# === Ministry of Health site queries — Tier 1 + Tier 2 only → topic: "news" ===
+# Tier 3 MoH sites rarely publish English content; skip to save budget
 MOH_SITE_QUERIES = [
-    "site:mohs.gov.sl digital health",         # Sierra Leone MoH  (Tier 1)
-    "site:mohfw.gov.bd digital health",        # Bangladesh MoH    (Tier 1)
-    "site:health.go.ke digital health",        # Kenya MoH         (Tier 2)
-    "site:moh.gov.rw digital health",          # Rwanda MoH        (Tier 2)
-    "site:moh.gov.gh digital health",          # Ghana MoH         (Tier 2)
-    "site:mohfw.gov.in digital health",        # India MoH         (Tier 2)
-    "site:moh.gov.sa digital health",          # Saudi Arabia MoH  (Tier 3)
-    "site:mohcdgec.go.tz digital health",      # Tanzania MoH      (Tier 3)
-    "site:health.gov.bt digital health",       # Bhutan MoH        (Tier 3)
+    "site:mohs.gov.sl digital health",       # Sierra Leone MoH  (Tier 1)
+    "site:mohfw.gov.bd digital health",      # Bangladesh MoH    (Tier 1)
+    "site:health.go.ke digital health",      # Kenya MoH         (Tier 2)
+    "site:moh.gov.rw digital health",        # Rwanda MoH        (Tier 2)
+    "site:moh.gov.gh digital health",        # Ghana MoH         (Tier 2)
+    "site:mohfw.gov.in digital health",      # India MoH         (Tier 2)
 ]
 
 # === URL Exclusion List ===
