@@ -228,6 +228,34 @@ MOH_SITE_QUERIES = [
     "site:health.gov.bt",                      # Bhutan MoH        (Tier 3)
 ]
 
+# === URL Exclusion List ===
+# Articles at these URLs will never be returned by the scraper.
+# Add any URL that is outdated, already captured, or irrelevant.
+EXCLUDED_URLS: set[str] = {
+    # Sierra Leone — already captured / static docs
+    "https://mohs.gov.sl/download/68/digital-health/18150/sierral-leone-digital-health-roadmap-2024-2026-2.pdf",
+    "https://www.linkedin.com/posts/ricardpognon_sierra-leone-national-digital-health-roadmap-activity-7150702536637800448-mz-C/",
+    "https://sierraleone.unfpa.org/en/news/dsti-unfpa-partner-digitize-sierra-leones-nursing-and-midwifery-council-membership",
+    "https://thetimes-sierraleone.com/sierra-leone-launches-digital-platform-for-nurses-midwives/",
+    "https://moice.gov.sl/dsti-unfpa-partner-to-digitize-sierra-leones-nursing-and-midwifery-council-membership/",
+    "https://mohs.gov.sl/moh-launches-health-information-hub/",
+    "https://sierraleone.un.org/en/308623-centralized-health-data-system-launched-sierra-leone",
+    "https://un-dco.org/stories/transforming-health-systems-sierra-leone",
+    "https://africapublicity.com/un-agencies-sierra-leones-ministry-of-health-sign-flagship-health-project-to-advance-universal-health-coverage/",
+    "https://www.povertyactionlab.org/evaluation/digital-monitoring-and-health-service-provision-sierra-leone?lang=en",
+    "https://www.linkedin.com/posts/erin-broekhuysen-39a61010_how-can-program-implementers-turn-research-activity-7310131565815083008-T9-o",
+    # Bangladesh
+    "https://hrm.dghs.gov.bd/public/facility-registry/reports",
+    "https://www.gavi.org/partner-countries/south-east-asia/bangladesh",
+    # Ghana
+    "https://www.newsghana.com.gh/csir-insti-unveils-ai-tools-to-reshape-ghanas-agriculture-and-healthcare/",
+    "https://www.ghanamma.com/2026/04/12/csir-insti-unveils-ai-tools-to-reshape-ghanas-agriculture-and-healthcare/",
+    # Saudi Arabia
+    "https://www.vision2030.gov.sa/en/explore/programs/health-sector-transformation-program",
+    "https://healthcluster.co/telemedicine-in-ksa/",
+    "https://www.grandviewresearch.com/industry-analysis/saudi-arabia-digital-health-market-report",
+}
+
 # === Agent Settings ===
 MAX_ARTICLES_PER_RUN   = int(os.getenv("MAX_ARTICLES_PER_RUN", "20"))
 MIN_VERIFICATION_SCORE = float(os.getenv("MIN_VERIFICATION_SCORE", "0.6"))

@@ -12,7 +12,7 @@ from backend.config import (
     SEARCH_QUERIES, SEARCH_QUERIES_TIER1, SEARCH_QUERIES_TIER2, SEARCH_QUERIES_TIER3,
     TWITTER_QUERIES, MOH_SITE_QUERIES, OFFICIAL_QUERIES, SENTIMENT_QUERIES,
     MAX_ARTICLES_PER_RUN, AI_PROVIDER, SCRAPER_MODEL, SEARCH_LOOKBACK_DAYS,
-    TARGET_COUNTRIES,
+    TARGET_COUNTRIES, EXCLUDED_URLS,
 )
 from backend.agents.base_agent import get_ai_client, call_ai, parse_json_response
 
@@ -147,12 +147,16 @@ async def search_serper(query: str) -> list[dict]:
 
 
 def deduplicate(articles: list[dict]) -> list[dict]:
-    """Remove duplicate URLs."""
+    """Remove duplicate and excluded URLs."""
     seen_urls = set()
     unique = []
     for a in articles:
         url = a.get("url", "")
-        if url and url not in seen_urls:
+        if not url:
+            continue
+        if url in EXCLUDED_URLS:
+            continue
+        if url not in seen_urls:
             seen_urls.add(url)
             unique.append(a)
     return unique
@@ -266,7 +270,9 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
             item["_query"] = query
         all_raw.extend(result)
 
-    await emit(f"Collected {len(all_raw)} raw results. Stratifying per country...")
+    # Strip excluded URLs before any processing
+    all_raw = [r for r in all_raw if r.get("url", "") not in EXCLUDED_URLS]
+    await emit(f"Collected {len(all_raw)} raw results (excluded URLs removed). Stratifying per country...")
 
     # ── Per-country bucketing ─────────────────────────────────────────────────
     # Each country gets its own raw-result bucket so no single country can
