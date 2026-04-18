@@ -366,6 +366,13 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
         for c in TARGET_COUNTRIES if per_country[c]
     )
     slim_raw = [slim_result(r) for r in slim_input[:60]]
+
+    # Early exit — no raw results means search API is exhausted or offline.
+    # Skip Claude call entirely to avoid burning AI credits on nothing.
+    if not slim_raw:
+        await emit("WARNING: 0 raw results returned. Search API may be over quota or offline. Aborting — no AI credits used.")
+        return {"articles": [], "tokens_used": 0, "sources_searched": sources_searched, "raw_count": 0}
+
     await emit(f"Per-country raw: {budget_log}. Sending {len(slim_raw)} items to AI...")
 
     client = get_ai_client(AI_PROVIDER)
