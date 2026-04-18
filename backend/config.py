@@ -128,7 +128,7 @@ COUNTRY_QUERIES: dict[str, dict] = {
     "Sierra Leone": {
         "search":    ["digital health Sierra Leone", "Sierra Leone mHealth telemedicine healthcare", "Sierra Leone health technology implementation"],
         "official":  ["Sierra Leone Minister of Health digital health announcement", "MOHS Sierra Leone health policy pronouncement"],
-        "moh_site":  "site:mohs.gov.sl",
+        "moh_site":  "site:mohs.gov.sl digital health",
         "sentiment": "digital health Sierra Leone community discussion sentiment",
     },
     "Bangladesh": {
@@ -140,19 +140,19 @@ COUNTRY_QUERIES: dict[str, dict] = {
     "Kenya": {
         "search":    ["digital health Kenya", "Kenya telemedicine mHealth policy"],
         "official":  ["Kenya Cabinet Secretary Health digital announcement", "Kenya MOH digital health tools launched"],
-        "moh_site":  "site:health.go.ke",
+        "moh_site":  "site:health.go.ke digital health",
         "sentiment": "digital health Kenya community discussion",
     },
     "Rwanda": {
         "search":    ["digital health Rwanda", "Rwanda eHealth telemedicine implementation"],
         "official":  ["Rwanda Minister of Health digital health pronouncement", "Rwanda MOH digital health update"],
-        "moh_site":  "site:moh.gov.rw",
+        "moh_site":  "site:moh.gov.rw digital health",
         "sentiment": "digital health Rwanda community discussion",
     },
     "Ghana": {
         "search":    ["digital health Ghana", "Ghana mHealth health technology policy"],
         "official":  ["Ghana Minister of Health digital health announcement", "Ghana MOH health plans digital"],
-        "moh_site":  "site:moh.gov.gh",
+        "moh_site":  "site:moh.gov.gh digital health",
         "sentiment": "digital health Ghana community discussion",
     },
     "India": {
@@ -170,7 +170,7 @@ COUNTRY_QUERIES: dict[str, dict] = {
     "Tanzania": {
         "search":    ["digital health Tanzania", "Tanzania mHealth health technology policy"],
         "official":  ["Tanzania Minister of Health digital health update", "Tanzania MOH digital health"],
-        "moh_site":  "site:mohcdgec.go.tz",
+        "moh_site":  "site:mohcdgec.go.tz digital health",
         "sentiment": "digital health Tanzania community discussion",
     },
     "Bhutan": {
@@ -217,15 +217,15 @@ SENTIMENT_QUERIES = [
 
 # === Ministry of Health site-specific queries ===
 MOH_SITE_QUERIES = [
-    "site:mohs.gov.sl",                        # Sierra Leone MoH  (Tier 1)
+    "site:mohs.gov.sl digital health",         # Sierra Leone MoH  (Tier 1)
     "site:mohfw.gov.bd digital health",        # Bangladesh MoH    (Tier 1)
-    "site:health.go.ke",                       # Kenya MoH         (Tier 2)
-    "site:moh.gov.rw",                         # Rwanda MoH        (Tier 2)
-    "site:moh.gov.gh",                         # Ghana MoH         (Tier 2)
+    "site:health.go.ke digital health",        # Kenya MoH         (Tier 2)
+    "site:moh.gov.rw digital health",          # Rwanda MoH        (Tier 2)
+    "site:moh.gov.gh digital health",          # Ghana MoH         (Tier 2)
     "site:mohfw.gov.in digital health",        # India MoH         (Tier 2)
     "site:moh.gov.sa digital health",          # Saudi Arabia MoH  (Tier 3)
-    "site:mohcdgec.go.tz",                     # Tanzania MoH      (Tier 3)
-    "site:health.gov.bt",                      # Bhutan MoH        (Tier 3)
+    "site:mohcdgec.go.tz digital health",      # Tanzania MoH      (Tier 3)
+    "site:health.gov.bt digital health",       # Bhutan MoH        (Tier 3)
 ]
 
 # === URL Exclusion List ===
