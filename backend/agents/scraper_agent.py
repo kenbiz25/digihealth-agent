@@ -1,10 +1,13 @@
 """
 Scraper Agent - Collects digital health Africa news from Twitter, LinkedIn, and the web.
-Uses Tavily for broad web/social search + optional Twitter API v2.
+Primary: Tavily API. Free fallback: Google News RSS + DuckDuckGo (no API key required).
 """
 import asyncio
 import httpx
 import json
+import re
+import urllib.parse
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any
 from backend.config import (
@@ -18,6 +21,13 @@ from backend.config import (
 
 # Hard cap on Tavily calls per full run — keeps usage ≤50 searches/run
 MAX_TAVILY_CALLS = 50
+
+# Session-level flag: set True when Tavily returns 432 (quota exceeded)
+_tavily_quota_exceeded = False
+
+# Semaphore limits concurrent DuckDuckGo calls (DDG blocks high concurrency)
+_ddg_semaphore: asyncio.Semaphore | None = None
+
 from backend.agents.base_agent import get_ai_client, call_ai, parse_json_response
 
 
@@ -61,8 +71,9 @@ Return a JSON array of news items. If no relevant items found, return [].
 
 
 async def search_tavily(query: str, topic: str = "general") -> list[dict]:
-    """Search using Tavily API - supports web + social content."""
-    if not TAVILY_API_KEY:
+    """Search using Tavily API. Detects quota exhaustion and sets session flag."""
+    global _tavily_quota_exceeded
+    if _tavily_quota_exceeded or not TAVILY_API_KEY:
         return []
     url = "https://api.tavily.com/search"
     payload = {
@@ -74,18 +85,95 @@ async def search_tavily(query: str, topic: str = "general") -> list[dict]:
         "max_results": 10,
         "topic": topic,
         "days": SEARCH_LOOKBACK_DAYS,
-        # Block high-volume syndicators that republish the same AP/Reuters wire story
         "exclude_domains": ["msn.com", "yahoo.com", "allafrica.com", "feedspot.com", "flipboard.com"],
     }
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             r = await client.post(url, json=payload)
+            if r.status_code == 432:
+                _tavily_quota_exceeded = True
+                print("[Scraper] Tavily quota exceeded — switching to free search for this session")
+                return []
             r.raise_for_status()
-            data = r.json()
-            return data.get("results", [])
+            return r.json().get("results", [])
         except Exception as e:
             print(f"[Scraper] Tavily error for '{query}': {e}")
             return []
+
+
+async def search_google_news_rss(query: str) -> list[dict]:
+    """Free: Google News RSS — no API key, concurrent-safe, best for news queries."""
+    encoded = urllib.parse.quote(query)
+    url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en&num=10"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; DigiHealthBot/1.0)"}
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        try:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status()
+            root = ET.fromstring(r.text)
+            results = []
+            for item in root.findall(".//item")[:10]:
+                title = item.findtext("title") or ""
+                link = item.findtext("link") or ""
+                pub_date = item.findtext("pubDate") or ""
+                source_el = item.find("source")
+                source_name = (source_el.text if source_el is not None else "") or "Google News"
+                description = re.sub(r"<[^>]+>", "", item.findtext("description") or "")
+                if not link:
+                    continue
+                results.append({
+                    "title": title,
+                    "url": link,
+                    "content": description,
+                    "source": "news",
+                    "source_name": source_name,
+                    "published_date": pub_date,
+                })
+            return results
+        except Exception as e:
+            print(f"[Scraper] Google News RSS error for '{query}': {e}")
+            return []
+
+
+async def search_duckduckgo(query: str) -> list[dict]:
+    """Free: DuckDuckGo — supports site: operators, best for web/LinkedIn/general queries."""
+    global _ddg_semaphore
+    if _ddg_semaphore is None:
+        _ddg_semaphore = asyncio.Semaphore(3)
+    async with _ddg_semaphore:
+        try:
+            from ddgs import DDGS
+            loop = asyncio.get_event_loop()
+            raw = await loop.run_in_executor(None, lambda: list(DDGS().text(query, max_results=8)))
+            return [
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "content": r.get("body", ""),
+                    "source": "web",
+                    "source_name": urllib.parse.urlparse(r.get("href", "")).netloc,
+                    "published_date": "",
+                }
+                for r in raw if r.get("href")
+            ]
+        except Exception as e:
+            print(f"[Scraper] DuckDuckGo error for '{query}': {e}")
+            return []
+
+
+async def search_web(query: str, topic: str = "general") -> list[dict]:
+    """
+    Unified search entry point.
+    Uses Tavily when quota is available; auto-falls back to free alternatives:
+      - topic='news' without site: → Google News RSS
+      - topic='general' or site: query → DuckDuckGo
+    """
+    if TAVILY_API_KEY and not _tavily_quota_exceeded:
+        return await search_tavily(query, topic)
+    # Free fallback path
+    if topic == "news" and "site:" not in query:
+        return await search_google_news_rss(query)
+    return await search_duckduckgo(query)
 
 
 async def search_twitter_api(query: str) -> list[dict]:
@@ -199,16 +287,16 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
                 is_t3_country = country_filter in COUNTRIES_TIER3
                 for q in cq.get("search", []):
                     topic = "general" if is_t3_country else "news"
-                    search_tasks.append(("tavily_country", q, search_tavily(q, topic)))
+                    search_tasks.append(("tavily_country", q, search_web(q, topic)))
                 moh = cq.get("moh_site", "")
                 if moh:
-                    search_tasks.append(("moh_site", moh, search_tavily(moh, "news")))
+                    search_tasks.append(("moh_site", moh, search_web(moh, "news")))
                 for q in cq.get("official", []):
-                    search_tasks.append(("official", q, search_tavily(q, "news")))
+                    search_tasks.append(("official", q, search_web(q, "news")))
                 sent = cq.get("sentiment", "")
                 if sent:
-                    search_tasks.append(("sentiment", sent, search_tavily(sent, "general")))
-                    search_tasks.append(("linkedin", f"site:linkedin.com {sent}", search_tavily(f"site:linkedin.com digital health {country_filter}", "general")))
+                    search_tasks.append(("sentiment", sent, search_web(sent, "general")))
+                    search_tasks.append(("linkedin", f"site:linkedin.com {sent}", search_web(f"site:linkedin.com digital health {country_filter}", "general")))
                 sources_searched.append(f"Tavily — {country_filter} focused")
                 sources_searched.append(f"MoH Site — {country_filter}")
                 sources_searched.append(f"Officials — {country_filter}")
@@ -252,7 +340,7 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
 
         if TAVILY_API_KEY:
             for src_type, q, topic in tavily_plan:
-                search_tasks.append((src_type, q, search_tavily(q, topic)))
+                search_tasks.append((src_type, q, search_web(q, topic)))
             sources_searched.append(f"Tavily ({len(tavily_plan)} queries, ≤{MAX_TAVILY_CALLS} cap)")
             sources_searched.append(f"Ministry of Health Sites ({len(MOH_SITE_QUERIES)})")
             sources_searched.append("LinkedIn + Official + Sentiment (via Tavily)")
@@ -434,10 +522,10 @@ Return JSON array. Each item: {{title, url, source, source_name, published_at, r
                     break
                 cq = COUNTRY_QUERIES.get(c, {})
                 for q in cq.get("search", [f"digital health {c}"])[:2]:
-                    supp_tasks.append((c, q, search_tavily(q, "news")))
+                    supp_tasks.append((c, q, search_web(q, "news")))
                 # Tier 3: also try general topic for broader hit
                 if c in COUNTRIES_TIER3 and len(supp_tasks) < supp_budget:
-                    supp_tasks.append((c, f"{c} health technology 2025", search_tavily(f"{c} health technology 2025", "general")))
+                    supp_tasks.append((c, f"{c} health technology 2025", search_web(f"{c} health technology 2025", "general")))
 
             await asyncio.sleep(12)
             supp_results = await asyncio.gather(*[t[2] for t in supp_tasks], return_exceptions=True)
