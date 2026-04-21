@@ -13,7 +13,7 @@ from typing import Any
 from backend.config import (
     TAVILY_API_KEY, TWITTER_BEARER_TOKEN, SERPER_API_KEY,
     SEARCH_QUERIES, SEARCH_QUERIES_TIER1, SEARCH_QUERIES_TIER2, SEARCH_QUERIES_TIER3,
-    TWITTER_QUERIES, LINKEDIN_QUERIES, MOH_SITE_QUERIES, OFFICIAL_QUERIES, SENTIMENT_QUERIES,
+    TWITTER_QUERIES, LINKEDIN_QUERIES, MOH_SITE_QUERIES, OFFICIAL_QUERIES, SENTIMENT_QUERIES, DONOR_QUERIES,
     MAX_ARTICLES_PER_RUN, AI_PROVIDER, SCRAPER_MODEL, SEARCH_LOOKBACK_DAYS,
     TARGET_COUNTRIES, COUNTRIES_TIER1, COUNTRIES_TIER2, COUNTRIES_TIER3,
     COUNTRY_QUERIES, EXCLUDED_URLS,
@@ -54,13 +54,24 @@ For each relevant news item extract:
 - is_official: true if from a Ministry of Health, government body, or named senior official; false otherwise
 - sentiment_signal: "positive" | "negative" | "neutral" | "mixed" — the tone of the item
 
+SOURCE SCOPE — cast wide, do NOT limit to African publications:
+- Global donors and funders reporting on target countries: USAID, Gates Foundation,
+  Wellcome Trust, FCDO/DFID, Gavi, Global Fund, World Bank, AfDB, UNICEF, WHO, PEPFAR
+- International health journals and think-tanks: The Lancet, BMJ, Health Affairs,
+  GSMA Intelligence, PATH, PSI, JSI, Aga Khan Foundation, Jhpiego, MSF
+- Government and intergovernmental sources: ministry sites, UN agencies, World Bank
+- Tech/innovation press covering these countries: MedCity News, Health Tech World,
+  TechCrunch Africa, Disrupt Africa, Quartz Africa, Rest of World
+- LinkedIn posts, tweets, conference proceedings, donor press releases
+
 Coverage scope — include ALL of:
 - Digital health tools, apps, platforms, or infrastructure launched/implemented
 - Telemedicine, mHealth, eHealth deployments and updates
 - Ministry of Health plans, policies, meetings, or official announcements
 - Government minister or senior official statements/pronouncements on healthcare
-- Health funding, grants, partnerships, and procurement decisions
+- Health funding, grants, partnerships, and procurement decisions (from any donor)
 - AI/data in healthcare
+- Donor reports, evaluations, and implementation updates mentioning target countries
 - LinkedIn/Twitter community discussions, reactions, and sentiments about health developments
 - Conference outcomes and stakeholder meetings
 
@@ -70,7 +81,7 @@ Return a JSON array of news items. If no relevant items found, return [].
 """
 
 
-async def search_tavily(query: str, topic: str = "general") -> list[dict]:
+async def search_tavily(query: str, topic: str = "general", days: int | None = None) -> list[dict]:
     """Search using Tavily API. Detects quota exhaustion and sets session flag."""
     global _tavily_quota_exceeded
     if _tavily_quota_exceeded or not TAVILY_API_KEY:
@@ -84,7 +95,7 @@ async def search_tavily(query: str, topic: str = "general") -> list[dict]:
         "include_raw_content": True,
         "max_results": 10,
         "topic": topic,
-        "days": SEARCH_LOOKBACK_DAYS,
+        "days": days if days is not None else SEARCH_LOOKBACK_DAYS,
         "exclude_domains": ["msn.com", "yahoo.com", "allafrica.com", "feedspot.com", "flipboard.com"],
     }
     async with httpx.AsyncClient(timeout=30) as client:
@@ -101,10 +112,13 @@ async def search_tavily(query: str, topic: str = "general") -> list[dict]:
             return []
 
 
-async def search_google_news_rss(query: str) -> list[dict]:
+async def search_google_news_rss(query: str, days: int | None = None) -> list[dict]:
     """Free: Google News RSS — no API key, concurrent-safe, best for news queries."""
     encoded = urllib.parse.quote(query)
-    url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en&num=10"
+    # tbs param: qdr:d3 = last 3 days, qdr:w = last week, qdr:m = last month
+    tbs_map = {1: "qdr:d", 2: "qdr:d2", 3: "qdr:d3", 7: "qdr:w", 30: "qdr:m"}
+    tbs = tbs_map.get(days or SEARCH_LOOKBACK_DAYS, "qdr:w")
+    url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en&tbs={tbs}&num=10"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; DigiHealthBot/1.0)"}
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
         try:
@@ -135,7 +149,7 @@ async def search_google_news_rss(query: str) -> list[dict]:
             return []
 
 
-async def search_duckduckgo(query: str) -> list[dict]:
+async def search_duckduckgo(query: str, days: int | None = None) -> list[dict]:
     """Free: DuckDuckGo — supports site: operators, best for web/LinkedIn/general queries."""
     global _ddg_semaphore
     if _ddg_semaphore is None:
@@ -144,7 +158,9 @@ async def search_duckduckgo(query: str) -> list[dict]:
         try:
             from ddgs import DDGS
             loop = asyncio.get_event_loop()
-            raw = await loop.run_in_executor(None, lambda: list(DDGS().text(query, max_results=8)))
+            d = days or SEARCH_LOOKBACK_DAYS
+            timelimit = "d" if d <= 1 else ("w" if d <= 7 else "m")
+            raw = await loop.run_in_executor(None, lambda: list(DDGS().text(query, max_results=8, timelimit=timelimit)))
             return [
                 {
                     "title": r.get("title", ""),
@@ -161,7 +177,7 @@ async def search_duckduckgo(query: str) -> list[dict]:
             return []
 
 
-async def search_web(query: str, topic: str = "general") -> list[dict]:
+async def search_web(query: str, topic: str = "general", days: int | None = None) -> list[dict]:
     """
     Unified search entry point.
     Uses Tavily when quota is available; auto-falls back to free alternatives:
@@ -169,11 +185,11 @@ async def search_web(query: str, topic: str = "general") -> list[dict]:
       - topic='general' or site: query → DuckDuckGo
     """
     if TAVILY_API_KEY and not _tavily_quota_exceeded:
-        return await search_tavily(query, topic)
+        return await search_tavily(query, topic, days=days)
     # Free fallback path
     if topic == "news" and "site:" not in query:
-        return await search_google_news_rss(query)
-    return await search_duckduckgo(query)
+        return await search_google_news_rss(query, days=days)
+    return await search_duckduckgo(query, days=days)
 
 
 async def search_twitter_api(query: str) -> list[dict]:
@@ -277,36 +293,54 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
     _base_tavily_count = 0  # updated after full-run query assembly
 
     if country_filter:
-        # ── Country-specific run: use per-country query map ─────────────────
+        # ── Country-specific deep scan: full 50-call budget, 3-day lookback ──
+        # All resources focused on one country for maximum freshness and coverage.
         cq = COUNTRY_QUERIES.get(country_filter, {})
         if not cq:
             await emit(f"Unknown country filter '{country_filter}' — running full scan instead.")
             country_filter = None
         else:
-            if TAVILY_API_KEY:
-                is_t3_country = country_filter in COUNTRIES_TIER3
-                for q in cq.get("search", []):
-                    topic = "general" if is_t3_country else "news"
-                    search_tasks.append(("tavily_country", q, search_web(q, topic)))
-                moh = cq.get("moh_site", "")
-                if moh:
-                    search_tasks.append(("moh_site", moh, search_web(moh, "news")))
-                for q in cq.get("official", []):
-                    search_tasks.append(("official", q, search_web(q, "news")))
-                sent = cq.get("sentiment", "")
-                if sent:
-                    search_tasks.append(("sentiment", sent, search_web(sent, "general")))
-                    search_tasks.append(("linkedin", f"site:linkedin.com {sent}", search_web(f"site:linkedin.com digital health {country_filter}", "general")))
-                sources_searched.append(f"Tavily — {country_filter} focused")
-                sources_searched.append(f"MoH Site — {country_filter}")
-                sources_searched.append(f"Officials — {country_filter}")
+            c = country_filter
+            moh = cq.get("moh_site", "")
+            # 15 orthogonal query angles — news/general matched to content type
+            deep_plan: list[tuple[str, str, str]] = [
+                ("country_news",      f"{c} digital health launched announced 2025 2026",            "news"),
+                ("country_news",      f"{c} Ministry of Health digital technology announcement",      "news"),
+                ("country_news",      f"{c} mHealth telemedicine implementation deployed rollout",    "news"),
+                ("country_news",      f"{c} health technology funding grant awarded 2025",            "news"),
+                ("country_news",      f"{c} eHealth digital health policy regulation update",         "news"),
+                ("country_news",      f"{c} health information system data platform update",          "news"),
+                ("country_news",      f"{c} digital health AI artificial intelligence healthcare",    "news"),
+                ("country_news",      f"{c} health technology conference summit stakeholder 2025",    "news"),
+                ("country_news",      f"{c} WHO UNICEF USAID digital health partnership 2025",       "news"),
+                ("country_news",      f"{c} health minister digital technology statement 2025",       "news"),
+                ("country_news",      f"{c} telemedicine community health workers mobile",            "news"),
+                ("country_news",      f"{c} digital health app platform service launched",            "news"),
+                ("official",          f"{c} Minister of Health digital health pronouncement 2025",   "news"),
+                # Donor / global org intelligence
+                ("donor",             f"USAID WHO UNICEF Gates {c} digital health 2025",             "news"),
+                ("donor",             f"World Bank FCDO {c} health technology funding 2025",         "news"),
+                ("donor",             f"PATH JSI Wellcome {c} digital health implementation 2025",   "news"),
+                # Social / LinkedIn
+                ("linkedin_country",  f"site:linkedin.com {c} digital health",                       "general"),
+                ("sentiment_country", f"{c} digital health community discussion reaction 2025",       "general"),
+            ]
+            if moh:
+                deep_plan.append(("moh_site", moh, "news"))
+            # Cap at full budget
+            deep_plan = deep_plan[:MAX_TAVILY_CALLS]
+            _base_tavily_count = len(deep_plan)
+
+            for src_type, q, topic in deep_plan:
+                # 3-day lookback for single-country: get the very latest
+                search_tasks.append((src_type, q, search_web(q, topic, days=3)))
+
+            sources_searched.append(f"{c} deep scan — {len(deep_plan)} queries (3-day lookback)")
+            sources_searched.append(f"MoH Site | Official | LinkedIn | Sentiment — {c}")
+
             if TWITTER_BEARER_TOKEN:
-                search_tasks.append(("twitter_api", f"digital health {country_filter}", search_twitter_api(f"digital health {country_filter}")))
+                search_tasks.append(("twitter_api", f"digital health {c}", search_twitter_api(f"digital health {c}")))
                 sources_searched.append("Twitter/X API")
-            if SERPER_API_KEY and not TAVILY_API_KEY:
-                for q in cq.get("search", []):
-                    search_tasks.append(("serper", q, search_serper(q)))
-                sources_searched.append("Google Search (Serper)")
 
     if not country_filter:
         # ── Full run: tiered, single-topic-per-query, capped at MAX_TAVILY_CALLS ──
@@ -330,6 +364,9 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
         # Official pronouncements — news topic
         for q in OFFICIAL_QUERIES:
             tavily_plan.append(("official", q, "news"))
+        # Donor & global org updates — news topic
+        for q in DONOR_QUERIES:
+            tavily_plan.append(("donor", q, "news"))
         # Social sentiment — general topic
         for q in SENTIMENT_QUERIES:
             tavily_plan.append(("sentiment", q, "general"))
@@ -375,58 +412,67 @@ async def run_scraper(run_id: str, websocket_callback=None, country_filter: str 
 
     # Strip excluded URLs before any processing
     all_raw = [r for r in all_raw if r.get("url", "") not in EXCLUDED_URLS]
-    await emit(f"Collected {len(all_raw)} raw results (excluded URLs removed). Stratifying per country...")
+    await emit(f"Collected {len(all_raw)} raw results (excluded URLs removed). Stratifying...")
 
-    # ── Per-country bucketing ─────────────────────────────────────────────────
-    # Each country gets its own raw-result bucket so no single country can
-    # crowd out another within the same tier.
-    per_country: dict[str, list] = {c: [] for c in TARGET_COUNTRIES}
-    official_raw:     list = []
-    sentiment_raw:    list = []
-    country_run_raw:  list = []
-    other_raw:        list = []
+    # ── Bucketing ────────────────────────────────────────────────────────────
+    if country_filter:
+        # Single-country deep scan: pass ALL results through — no tier capping
+        # Deduplicate by URL then take up to 80 items for AI
+        seen: set[str] = set()
+        stratified: list[dict] = []
+        for item in all_raw:
+            url = item.get("url") or item.get("link") or ""
+            if url and url not in seen:
+                seen.add(url)
+                stratified.append(item)
+        await emit(f"Single-country deep scan: {len(stratified)} unique results for {country_filter}.")
+    else:
+        # Full run: per-country bucketing so no single country crowds others
+        per_country: dict[str, list] = {c: [] for c in TARGET_COUNTRIES}
+        official_raw:     list = []
+        sentiment_raw:    list = []
+        country_run_raw:  list = []
+        other_raw:        list = []
 
-    def _infer_country(query: str) -> str | None:
-        q = query.lower()
-        for c in TARGET_COUNTRIES:
-            if c.lower() in q:
-                return c
-        return None
+        def _infer_country(query: str) -> str | None:
+            q = query.lower()
+            for c in TARGET_COUNTRIES:
+                if c.lower() in q:
+                    return c
+            return None
 
-    for i, (src_type, _query, _) in enumerate(search_tasks):
-        result = results[i]
-        if isinstance(result, Exception):
-            continue
-        for item in result:
-            item["_src_type"] = src_type
-            item["_query"] = _query
-        if src_type in ("official", "moh_site", "moh_site_serper"):
-            official_raw.extend(result)
-        elif src_type in ("sentiment", "linkedin_tavily", "linkedin"):
-            sentiment_raw.extend(result)
-        elif "country" in src_type:
-            country_run_raw.extend(result)
-        else:
-            c = _infer_country(_query)
-            if c:
-                per_country[c].extend(result)
+        for i, (src_type, _query, _) in enumerate(search_tasks):
+            result = results[i]
+            if isinstance(result, Exception):
+                continue
+            for item in result:
+                item["_src_type"] = src_type
+                item["_query"] = _query
+            if src_type in ("official", "moh_site", "moh_site_serper"):
+                official_raw.extend(result)
+            elif src_type in ("sentiment", "linkedin_tavily", "linkedin"):
+                sentiment_raw.extend(result)
+            elif "country" in src_type:
+                country_run_raw.extend(result)
             else:
-                other_raw.extend(result)
+                c = _infer_country(_query)
+                if c:
+                    per_country[c].extend(result)
+                else:
+                    other_raw.extend(result)
 
-    # Per-country budgets: Tier 1 gets deepest individual coverage
-    T1_BUDGET, T2_BUDGET, T3_BUDGET = 8, 5, 4
-
-    stratified: list[dict] = []
-    for c in COUNTRIES_TIER1:
-        stratified.extend(per_country[c][:T1_BUDGET])
-    for c in COUNTRIES_TIER2:
-        stratified.extend(per_country[c][:T2_BUDGET])
-    for c in COUNTRIES_TIER3:
-        stratified.extend(per_country[c][:T3_BUDGET])
-    stratified += official_raw[:8]
-    stratified += sentiment_raw[:5]
-    stratified += country_run_raw[:8]
-    stratified += other_raw[:4]
+        T1_BUDGET, T2_BUDGET, T3_BUDGET = 8, 5, 4
+        stratified = []
+        for c in COUNTRIES_TIER1:
+            stratified.extend(per_country[c][:T1_BUDGET])
+        for c in COUNTRIES_TIER2:
+            stratified.extend(per_country[c][:T2_BUDGET])
+        for c in COUNTRIES_TIER3:
+            stratified.extend(per_country[c][:T3_BUDGET])
+        stratified += official_raw[:8]
+        stratified += sentiment_raw[:5]
+        stratified += country_run_raw[:8]
+        stratified += other_raw[:4]
 
     # Deduplicate within stratified set by URL
     seen_urls: set[str] = set()

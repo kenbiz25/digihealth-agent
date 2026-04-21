@@ -199,7 +199,6 @@ SENTIMENT_QUERIES = [
 ]
 
 # === Ministry of Health site queries — Tier 1 + Tier 2 only → topic: "news" ===
-# Tier 3 MoH sites rarely publish English content; skip to save budget
 MOH_SITE_QUERIES = [
     "site:mohs.gov.sl digital health",       # Sierra Leone MoH  (Tier 1)
     "site:mohfw.gov.bd digital health",      # Bangladesh MoH    (Tier 1)
@@ -207,6 +206,18 @@ MOH_SITE_QUERIES = [
     "site:moh.gov.rw digital health",        # Rwanda MoH        (Tier 2)
     "site:moh.gov.gh digital health",        # Ghana MoH         (Tier 2)
     "site:mohfw.gov.in digital health",      # India MoH         (Tier 2)
+]
+
+# === Donor & global org queries — cast wide beyond local media → topic: "news" ===
+# Donors often publish implementation updates, evaluations, and grant announcements
+# that local media never cover. These are high-value signals for leadership.
+DONOR_QUERIES = [
+    "USAID digital health Sierra Leone Bangladesh Kenya Rwanda Ghana India 2025",
+    "Gates Foundation Wellcome digital health Africa India Bangladesh 2025",
+    "UNICEF WHO digital health Sierra Leone Bangladesh Kenya Rwanda 2025",
+    "World Bank digital health Africa India implementation 2025",
+    "FCDO PEPFAR Gavi digital health Africa 2025",
+    "PATH JSI digital health Sierra Leone Bangladesh Ghana Kenya 2025",
 ]
 
 # === URL Exclusion List ===
