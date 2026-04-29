@@ -63,9 +63,13 @@ class NewsArticle(Base):
     impact_rationale   = Column(Text, nullable=True)     # strategic significance
     recommended_action = Column(Text, nullable=True)     # imperative action for exec
     executive_headline = Column(Text, nullable=True)     # punchy Monday morning framing
-    sentiment_signal   = Column(String, nullable=True)   # positive | negative | neutral | mixed
-    is_official        = Column(Boolean, default=False)  # from ministry/official source
-    created_at         = Column(DateTime, default=datetime.utcnow)
+    sentiment_signal         = Column(String, nullable=True)   # positive | negative | neutral | mixed
+    is_official              = Column(Boolean, default=False)  # from ministry/official source
+    source_diversity_score   = Column(Float, nullable=True)    # 0-1: how many independent source types
+    is_continuation_story    = Column(Boolean, default=False)  # story seen in a previous run
+    continuation_of          = Column(Text, nullable=True)     # matched past article title
+    urgency_tier             = Column(String, nullable=True)   # URGENT | STANDARD | BACKGROUND (AI-classified)
+    created_at               = Column(DateTime, default=datetime.utcnow)
 
 
 class ReportRequest(Base):
@@ -81,17 +85,53 @@ class ReportRequest(Base):
     resolved_at = Column(DateTime, nullable=True)
 
 
+class ArticleFeedback(Base):
+    """User ratings on individual articles."""
+    __tablename__ = "article_feedback"
+    id          = Column(Integer, primary_key=True, index=True)
+    article_url = Column(String, index=True)
+    article_title = Column(String)
+    rating      = Column(String)   # "relevant" | "noise" | "critical_miss"
+    country     = Column(String, nullable=True)
+    category    = Column(String, nullable=True)
+    run_id      = Column(String, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+class SourceExclusion(Base):
+    """Sources the user has excluded from the pipeline."""
+    __tablename__ = "source_exclusions"
+    id          = Column(Integer, primary_key=True, index=True)
+    source_name = Column(String, unique=True, index=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class CuratedSource(Base):
+    """User-curated sources that the scraper always searches."""
+    __tablename__ = "curated_sources"
+    id          = Column(Integer, primary_key=True, index=True)
+    name        = Column(String)                        # friendly label
+    url         = Column(String, unique=True, index=True)  # domain or full URL
+    source_type = Column(String, default="site")       # site | rss | keyword
+    active      = Column(Boolean, default=True)
+    notes       = Column(String, nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Safe migration: add new columns to existing databases without dropping data
     _new_cols = [
-        ("impact_level",        "TEXT"),
-        ("impact_rationale",    "TEXT"),
-        ("recommended_action",  "TEXT"),
-        ("executive_headline",  "TEXT"),
-        ("countries_mentioned", "TEXT"),
-        ("sentiment_signal",    "TEXT"),
-        ("is_official",         "INTEGER DEFAULT 0"),
+        ("impact_level",            "TEXT"),
+        ("impact_rationale",        "TEXT"),
+        ("recommended_action",      "TEXT"),
+        ("executive_headline",      "TEXT"),
+        ("countries_mentioned",     "TEXT"),
+        ("sentiment_signal",        "TEXT"),
+        ("is_official",             "INTEGER DEFAULT 0"),
+        ("source_diversity_score",  "REAL"),
+        ("is_continuation_story",   "INTEGER DEFAULT 0"),
+        ("continuation_of",         "TEXT"),
+        ("urgency_tier",            "TEXT DEFAULT 'STANDARD'"),
     ]
     with engine.connect() as conn:
         for col_name, col_type in _new_cols:

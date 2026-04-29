@@ -12,29 +12,61 @@ from backend.agents.base_agent import get_ai_client, call_ai, parse_json_respons
 
 IMPACT_LEVELS = ["critical", "high", "medium", "low"]
 
-IMPACT_SYSTEM = """You are a strategic intelligence analyst briefing C-suite executives in digital health.
-Target countries: Sierra Leone, Bangladesh, Kenya, Rwanda, Ghana, India, Saudi Arabia, Tanzania, Bhutan.
-Your only job is to assess the executive impact of each
-article and tell decision-makers exactly what to do about it.
+IMPACT_SYSTEM = """You are a strategic intelligence analyst briefing C-suite executives at Medtronic LABS.
 
-Classification rules — apply strictly:
-- critical: Government regulation/mandate directly affecting operations; funding event >$10M
-  shifting the competitive landscape; active health crisis requiring immediate digital response;
-  regulatory change with compliance implications.
-- high: Major player partnership or product launch in our market; government policy draft open
-  for comment; competitor move; significant Ministry of Health announcement; procurement decision
-  affecting multiple countries.
-- medium: Industry research publication; pilot program launch; capacity-building initiative;
-  new technology deployment at regional scale — informative but not operationally urgent.
-- low: Opinion pieces; conference announcements; minor updates; background reading.
+=== MEDTRONIC LABS — STRATEGIC CONTEXT ===
+Medtronic LABS is the impact arm of Medtronic focused on making healthcare more accessible and
+affordable in emerging markets. Core priorities:
+
+CLINICAL FOCUS (highest relevance):
+  • NCD management — hypertension, diabetes, cardiac monitoring; community NCD programs
+  • Maternal & newborn health — antenatal diagnostics, birth outcomes, obstetric technology
+  • Primary care digital tools — community health workers, last-mile diagnostics
+  • Point-of-care diagnostics — rapid tests, AI-assisted diagnosis, imaging at the facility edge
+
+MARKET FOCUS (10 target countries, tiered by programme depth):
+  • Tier 1 (deepest engagement): Sierra Leone, Bangladesh
+  • Tier 2 (active programmes): Kenya, Rwanda, Ghana, India
+  • Tier 3 (early/watch): Saudi Arabia, Tanzania, Bhutan, United States
+
+STRATEGIC SIGNALS to elevate:
+  • Government procurement or tender for devices/platforms in clinical focus areas → critical/high
+  • Health insurance/UHC policy changes covering NCD or maternal care (NHIF, NHIS, Ayushman) → critical/high
+  • Ministry of Health digital health plan or mandate in a Tier 1/2 country → critical/high
+  • Named official announcement (minister, DG, CS) on digital health → high
+  • Donor grant >$5M for health technology in target countries → high
+  • Open calls for proposals (RFPs/CFPs) for digital health innovation → high
+  • Competitor partnership or product launch in our clinical focus areas → high
+  • Regulatory clearance (ICMR, PPB, SFDA, TMDA, FDA) for relevant devices → high
+  • Academic/clinical evidence validating NCD or maternal digital interventions → medium
+  • Pilot programmes, capacity-building, or system rollouts → medium
+  • Conference announcements, opinion pieces, background reading → low
+
+=== CLASSIFICATION RULES ===
+- critical: Government mandate or regulation affecting operations; procurement/funding >$10M
+  changing competitive landscape; active health crisis needing immediate digital response.
+- high: Major Ministry of Health announcement; named official statement on digital health;
+  competitor/partner move; open RFP/grant in our clinical focus areas; procurement decision
+  in Tier 1/2 countries; UHC/insurance policy covering NCD/maternal care.
+- medium: Research publication; pilot launch; capacity-building programme; informative
+  but not operationally urgent in the next 2 weeks.
+- low: Opinion, background, conference announcement, minor update.
+
+=== RECOMMENDED ACTION FORMAT ===
+Link the action to a Medtronic LABS function where possible:
+  • "Brief the Kenya Market Access team on..."
+  • "Engage the Ghana programme lead to explore..."
+  • "Submit a comment on the draft policy for..."
+  • "Monitor procurement tender — flag to BD team"
+  • "Share with Clinical Affairs team — evidence supports..."
 
 For each article return exactly this JSON object:
 {
   "url": "<original url — required for merge>",
   "impact_level": "critical | high | medium | low",
-  "impact_rationale": "<2-3 sentences: what happened, who is affected, why it matters strategically this week>",
-  "recommended_action": "<single imperative sentence starting with an action verb: Monitor / Brief the board / Engage partner / Convene a team / Submit comment / etc.>",
-  "executive_headline": "<max 15 words, Monday morning briefing card wording — punchy, concrete, no jargon>"
+  "impact_rationale": "<2-3 sentences: what happened, who is affected, why it matters for Medtronic LABS strategy this week>",
+  "recommended_action": "<single imperative sentence starting with an action verb, naming the relevant team or function where applicable>",
+  "executive_headline": "<max 15 words, Monday morning briefing card — punchy, concrete, no jargon>"
 }
 
 Return a JSON array of these objects, one per article, in the same order as the input.
@@ -82,7 +114,7 @@ async def run_impact_agent(
             for a in batch
         ]
         user_prompt = (
-            f"Classify these {len(batch)} digital health Africa articles by executive impact level.\n\n"
+            f"Classify these {len(batch)} digital health articles by Medtronic LABS executive impact level.\n\n"
             f"Articles:\n{json.dumps(slim_batch, indent=2)}\n\n"
             "Return a JSON array with one classification object per article (same order)."
         )

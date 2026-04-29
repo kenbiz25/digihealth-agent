@@ -10,31 +10,82 @@ from backend.config import TAVILY_API_KEY, SERPER_API_KEY, AI_PROVIDER, ENRICHER
 from backend.agents.base_agent import get_ai_client, call_ai, parse_json_response
 
 
-TARGET_COUNTRY_LIST = "Sierra Leone, Bangladesh, Kenya, Rwanda, Ghana, India, Saudi Arabia, Tanzania, Bhutan"
+TARGET_COUNTRY_LIST = "Sierra Leone, Bangladesh, Kenya, Rwanda, Ghana, India, Saudi Arabia, Tanzania, Bhutan, United States"
+_ALL_COUNTRIES = ["Sierra Leone", "Bangladesh", "Kenya", "Rwanda", "Ghana", "India", "Saudi Arabia", "Tanzania", "Bhutan", "United States"]
 
-ENRICHER_SYSTEM = f"""You are a research enrichment agent for digital health intelligence.
+ENRICHER_SYSTEM = f"""You are a research enrichment agent for Medtronic LABS digital health intelligence.
 Target countries ONLY: {TARGET_COUNTRY_LIST}
 
 Your role is to:
-1. Categorize each article into themes (e.g., telemedicine, mHealth, AI diagnostics, health data, policy, funding, infrastructure)
-2. Generate smart follow-up reading recommendations
-3. Add relevant context (key organizations, countries, impact)
-4. Suggest related search terms for deeper investigation
-5. Extract key metrics or statistics mentioned
+1. Categorize each article into a PRIMARY CATEGORY and sub-categories using the taxonomy below.
+2. Generate smart follow-up reading recommendations.
+3. Add relevant context (key organizations, countries, impact).
+4. Extract key metrics or statistics mentioned.
+5. Flag if this story appears to be a continuation of a developing story (see field: is_continuation_story).
+
+--- PRIMARY CATEGORY TAXONOMY ---
+Use EXACTLY one of the following primary categories:
+
+Clinical — Medtronic LABS Focus:
+  "NCD Management"         — hypertension, diabetes, cardiac monitoring, NCD programs
+  "Maternal Health Tech"   — maternal mortality, antenatal care, birth outcomes, obstetric care
+  "Primary Care Digital"   — community health workers, last-mile diagnostics, primary care tools
+  "Point of Care Dx"       — rapid diagnostics, POC testing, imaging, AI-assisted diagnosis
+
+Health System Infrastructure:
+  "Digital Health Platform" — EHR, HMIS, health data systems, interoperability
+  "Telemedicine / mHealth"  — teleconsultation, mHealth apps, remote care
+  "Health Data & AI"        — AI/ML in diagnostics, data analytics, predictive health
+  "Infrastructure & Connectivity" — device connectivity, rural network, power solutions
+
+Policy & Governance:
+  "Health Policy"           — government plans, ministerial announcements, national strategies
+  "Regulation & Approval"   — medical device registration, regulatory clearance, ICMR, SFDA, PPB, TMDA
+  "UHC & Insurance"         — universal health coverage, NHIF/NHIS, NCD reimbursement, tariff updates
+
+Market & Investment:
+  "Funding & Grants"        — donor disbursements, grants, health funding awards
+  "Budget & Fiscal"         — ministry health budgets, parliamentary votes, fiscal year allocations
+  "Procurement & Tender"    — medical supply procurement, device tenders, government contracts
+  "Partnership & M&A"       — commercial partnerships, joint ventures, acquisitions
+
+Events & Community:
+  "Conference Outcomes"     — summit declarations, conference communiqués, forum outcomes (AfDB, GSMA, WHO regional)
+  "Community Discussion"    — stakeholder sentiment, professional community reaction, social signal
+  "Research & Evidence"     — published studies, clinical trials, evaluation reports, RCTs
+
+Fallback (use only if none above fit):
+  "General Digital Health"
+
+--- URGENCY TIER ---
+Classify each article into exactly one tier:
+  "URGENT"     — time-sensitive; action needed within days.
+                 Examples: minister signs policy TODAY, tender deadline THIS WEEK,
+                 emergency declaration, RFP/call for proposals closes soon,
+                 breaking announcement, press release just issued.
+  "STANDARD"   — important but not time-critical; worth Monday morning briefing.
+                 Examples: funding announced, pilot launched, MOU signed,
+                 grant awarded, evaluation results published, new partnership.
+  "BACKGROUND" — context / evergreen; useful for strategic reference.
+                 Examples: market report, sector analysis, strategy overview,
+                 whitepaper, explainer, conference proceedings summary.
 
 For each article, return:
 {{
   "url": "original article url",
-  "category": "primary theme",
-  "sub_categories": ["list", "of", "themes"],
-  "key_organizations": ["WHO", "Ministry of Health", etc.],
-  "countries_mentioned": ["Sierra Leone", "Bangladesh", etc. — only from the target country list],
-  "key_metrics": ["50,000 patients served", etc.],
-  "impact_summary": "one line on the impact/significance",
+  "category": "primary category from taxonomy above",
+  "sub_categories": ["up to 3 secondary themes"],
+  "key_organizations": ["WHO", "Ministry of Health", "Medtronic", etc.],
+  "primary_country": "single country this article is CHIEFLY about, or null for genuinely global pieces",
+  "countries_mentioned": ["countries this article is PRIMARILY reporting on — EXCLUDE countries mentioned only as comparisons, examples, or global context; max 2 entries; ONLY from the target country list"],
+  "key_metrics": ["50,000 patients served", "$2M grant", etc.],
+  "impact_summary": "one sentence on significance for Medtronic LABS strategy",
+  "urgency_tier": "URGENT | STANDARD | BACKGROUND",
+  "is_continuation_story": true/false,
   "follow_up_links": [
     {{"title": "...", "url": "...", "why_relevant": "..."}}
   ],
-  "tags": ["mhealth", "funding", etc.]
+  "tags": ["ncd", "maternal-health", "regulation", "funding", etc.]
 }}
 """
 
@@ -62,10 +113,18 @@ async def find_follow_up_articles(title: str, category: str) -> list[dict]:
             return []
 
 
+def _story_overlap(title_a: str, title_b: str) -> int:
+    """Count meaningful word overlap between two titles (words >4 chars)."""
+    words_a = {w.lower() for w in title_a.split() if len(w) > 4}
+    words_b = {w.lower() for w in title_b.split() if len(w) > 4}
+    return len(words_a & words_b)
+
+
 async def run_enricher(
     articles: list[dict],
     run_id: str,
     websocket_callback=None,
+    recent_article_titles: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Enrich articles with categories, context, and follow-up links.
@@ -142,6 +201,9 @@ Return a JSON array with enrichment for each article (same order).
     await emit("Searching for follow-up reading links...")
     follow_up_results = await asyncio.gather(*follow_up_tasks, return_exceptions=True)
 
+    # Build past-article title set for continuity matching (Gap 10)
+    past_titles: list[str] = recent_article_titles or []
+
     # Merge everything together
     enriched_articles = []
     categories_count = {}
@@ -158,16 +220,41 @@ Return a JSON array with enrichment for each article (same order).
         ai_follow_ups = enrichment.get("follow_up_links", [])
         all_follow_ups = (ai_follow_ups + real_follow_ups)[:MAX_FOLLOW_UP_LINKS]
 
+        ai_countries = set(enrichment.get("countries_mentioned") or [])
+        scraper_countries = set(article.get("countries_mentioned") or [])
+        full_text = " ".join(filter(None, [
+            article.get("title", ""),
+            article.get("raw_content", ""),
+            article.get("source_name", ""),
+        ])).lower()
+        text_scan_countries = {c for c in _ALL_COUNTRIES if c.lower() in full_text}
+        final_countries = list(ai_countries | text_scan_countries | scraper_countries)
+
+        # Thematic continuity: check overlap with past article titles (Gap 10)
+        current_title = article.get("title", "")
+        continuation_of = ""
+        is_continuation = enrichment.get("is_continuation_story", False)
+        if not is_continuation and past_titles:
+            for past_title in past_titles:
+                if _story_overlap(current_title, past_title) >= 3:
+                    is_continuation = True
+                    continuation_of = past_title[:100]
+                    break
+
         merged = {
             **article,
             "category": enrichment.get("category", "General Digital Health"),
             "sub_categories": enrichment.get("sub_categories", []),
             "key_organizations": enrichment.get("key_organizations", []),
-            "countries_mentioned": enrichment.get("countries_mentioned", []),
+            "primary_country": enrichment.get("primary_country") or "",
+            "countries_mentioned": final_countries,
             "key_metrics": enrichment.get("key_metrics", []),
             "impact_summary": enrichment.get("impact_summary", ""),
+            "urgency_tier": enrichment.get("urgency_tier", "STANDARD"),
             "follow_up_links": all_follow_ups,
             "tags": enrichment.get("tags", []),
+            "is_continuation_story": is_continuation,
+            "continuation_of": continuation_of,
         }
         enriched_articles.append(merged)
 

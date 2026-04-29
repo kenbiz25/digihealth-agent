@@ -143,13 +143,31 @@ def build_styles() -> dict:
     }
 
 
+def _logo_dims(max_w: float, max_h: float) -> tuple[float, float]:
+    """Compute logo dimensions that fit within the box while preserving aspect ratio."""
+    if not LOGO_PATH:
+        return max_w, max_h
+    try:
+        from reportlab.lib.utils import ImageReader
+        iw, ih = ImageReader(LOGO_PATH).getSize()
+        if iw > 0 and ih > 0:
+            aspect = iw / ih
+            w = min(max_w, max_h * aspect)
+            h = w / aspect
+            return w, h
+    except Exception:
+        pass
+    return max_w, max_h
+
+
 def _draw_logo(canvas, x: float, y: float, max_w: float = 3.5*cm, max_h: float = 1.2*cm):
-    """Draw the Medtronic Labs logo if available."""
+    """Draw the Medtronic Labs logo preserving its natural aspect ratio."""
     if not LOGO_PATH:
         return
     try:
-        canvas.drawImage(LOGO_PATH, x, y, width=max_w, height=max_h,
-                         preserveAspectRatio=True, anchor="nw", mask="auto")
+        w, h = _logo_dims(max_w, max_h)
+        canvas.drawImage(LOGO_PATH, x, y, width=w, height=h,
+                         preserveAspectRatio=False, anchor="nw", mask="auto")
     except Exception as e:
         print(f"[PDF] Logo draw failed: {e}")
 
@@ -461,10 +479,11 @@ async def generate_pdf(report: dict[str, Any], run_id: str) -> str:
     # ── COVER PAGE ────────────────────────────────────────────────────────────
     story.append(Spacer(1, 2.5*cm))
 
-    # Logo on cover (if available)
+    # Logo on cover (if available) — preserve aspect ratio, never stretch
     if LOGO_PATH:
         try:
-            logo_img = RLImage(LOGO_PATH, width=5*cm, height=2*cm)
+            lw, lh = _logo_dims(max_w=5.5*cm, max_h=2.5*cm)
+            logo_img = RLImage(LOGO_PATH, width=lw, height=lh)
             logo_img.hAlign = "CENTER"
             story.append(logo_img)
             story.append(Spacer(1, 0.6*cm))

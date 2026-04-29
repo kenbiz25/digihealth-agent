@@ -15,7 +15,7 @@ from datetime import datetime, date
 from typing import Any, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
-from sqlalchemy import case, String
+from sqlalchemy import case, func, String
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -50,7 +50,8 @@ def _safe_config() -> dict:
             "smtp": bool(SMTP_PASSWORD),
         },
     }
-from backend.database import init_db, get_db, SessionLocal, AgentRun, AgentStep, NewsArticle, ReportRequest
+from backend.database import init_db, get_db, SessionLocal, AgentRun, AgentStep, NewsArticle, ReportRequest, ArticleFeedback, SourceExclusion, CuratedSource
+from urllib.parse import urlparse
 from backend.agents.orchestrator import run_pipeline
 from backend.agents.writer_agent import apply_user_request
 from backend.agents.scraper_agent import search_tavily, search_serper
@@ -131,7 +132,10 @@ class RunRequest(BaseModel):
     extra_instructions: str = ""
     ai_provider: str = AI_PROVIDER
     model_tier: str = "balanced"
-    country_filter: str = ""   # empty = all countries; set to run a single-country scan
+    country_filter: str = ""          # single country (legacy)
+    country_filters: list[str] = []   # multi-country selection
+    pipeline_mode: str = "full"       # "quick" = scrape+verify only; "full" = all steps + PDF
+    lookback_days: int = 7            # how many days back to search
 
 
 class UserRequest(BaseModel):
@@ -149,6 +153,15 @@ class ConfigUpdate(BaseModel):
 class CustomSearchRequest(BaseModel):
     query: str
     days: int = 7
+
+
+class FeedbackRequest(BaseModel):
+    url: str
+    title: str
+    rating: str   # "relevant" | "noise" | "critical_miss"
+    country: str = ""
+    category: str = ""
+    run_id: str = ""
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
@@ -192,14 +205,20 @@ async def get_status(db: Session = Depends(get_db)):
     """System status overview — no secrets exposed."""
     recent_runs = db.query(AgentRun).order_by(AgentRun.started_at.desc()).limit(5).all()
     last_run = recent_runs[0] if recent_runs else None
+    total_articles = db.query(func.count(NewsArticle.id)).scalar() or 0
+    verified_articles = db.query(func.count(NewsArticle.id)).filter(NewsArticle.verified == True).scalar() or 0
+    total_runs = db.query(func.count(AgentRun.id)).scalar() or 0
     return {
         "status": "running",
-        "ai_provider": AI_PROVIDER,           # provider name only, never the key
+        "ai_provider": AI_PROVIDER,
         "schedule": f"{SCHEDULE_HOUR:02d}:{SCHEDULE_MINUTE:02d} {TIMEZONE}",
         "next_run": get_next_run_time(),
         "email_enabled": EMAIL_ENABLED,
         "active_connections": len(manager.active),
         "keys_configured": _safe_config()["keys_configured"],
+        "total_articles": total_articles,
+        "verified_articles": verified_articles,
+        "total_runs": total_runs,
         "last_run": {
             "run_id": last_run.run_id if last_run else None,
             "status": last_run.status if last_run else None,
@@ -224,6 +243,9 @@ async def trigger_run(
                 trigger="manual",
                 extra_instructions=request.extra_instructions,
                 country_filter=request.country_filter or None,
+                country_filters=request.country_filters or None,
+                pipeline_mode=request.pipeline_mode,
+                lookback_days=request.lookback_days,
                 websocket_callback=broadcast_to_all,
             )
         except Exception as e:
@@ -464,45 +486,361 @@ async def get_models():
 @app.post("/api/custom-search")
 async def custom_search(body: CustomSearchRequest):
     """
-    User-triggered search on any topic/description using Tavily + Claude extraction.
-    Returns a list of relevant articles without saving to the database.
+    User-triggered search with Tavily (primary) + free-source fallbacks + Claude extraction.
+    Always returns a valid JSON array — never raises an exception to the frontend.
     """
-    from backend.config import TAVILY_API_KEY as _TAV
-    if not _TAV:
-        raise HTTPException(status_code=400, detail="TAVILY_API_KEY not configured")
-
-    # Search via Tavily
-    raw = await search_tavily(body.query, "general")
-    raw += await search_tavily(body.query, "news")
-
-    if not raw:
-        return []
-
-    import json as _json
-    system = (
-        "You are a research assistant. Extract relevant news/articles from raw search results. "
-        "Return a JSON array. Each item: {title, url, source_name, published_at, summary, relevance_score}. "
-        "Only include items clearly relevant to the user's query. If none, return []."
-    )
-    user_prompt = (
-        f"Query: {body.query}\n\nRaw results:\n{_json.dumps(raw[:40], indent=2)}\n\n"
-        "Return a JSON array of relevant articles."
-    )
-    client = get_ai_client(AI_PROVIDER)
-    response_text, _ = call_ai(client, system, user_prompt,
-                               model_tier=SCRAPER_MODEL, max_tokens=4000, provider=AI_PROVIDER)
     try:
-        articles = parse_json_response(response_text)
-        return [a for a in articles if isinstance(a, dict) and a.get("relevance_score", 0) >= 0.4]
-    except Exception:
-        return []
+        raw: list[dict] = []
+
+        # Primary: Tavily — two topic angles in parallel
+        if TAVILY_API_KEY:
+            t1, t2 = await asyncio.gather(
+                search_tavily(body.query, "general", days=body.days),
+                search_tavily(body.query, "news",    days=body.days),
+                return_exceptions=True,
+            )
+            if isinstance(t1, list): raw.extend(t1)
+            if isinstance(t2, list): raw.extend(t2)
+
+        # Fallback / supplement: free sources (always run; PubMed adds academic evidence)
+        from backend.agents.scraper_agent import (
+            search_google_news_rss, search_pubmed, search_world_bank,
+        )
+        free_results = await asyncio.gather(
+            search_google_news_rss(body.query, days=body.days),
+            search_pubmed(body.query),
+            search_world_bank(body.query),
+            return_exceptions=True,
+        )
+        for r in free_results:
+            if isinstance(r, list):
+                raw.extend(r)
+
+        if not raw:
+            return []
+
+        # Deduplicate by URL and preserve source field
+        seen: set[str] = set()
+        unique: list[dict] = []
+        for r in raw:
+            url = r.get("url", "")
+            if url and url not in seen:
+                seen.add(url)
+                # Normalise to common schema
+                unique.append({
+                    "title":        r.get("title", ""),
+                    "url":          url,
+                    "source":       r.get("source", "web"),
+                    "source_name":  r.get("source_name", ""),
+                    "published_at": r.get("published_date") or r.get("published_at", ""),
+                    "content":      (r.get("content") or r.get("raw_content") or "")[:300],
+                })
+        raw = unique[:40]
+
+        system = (
+            "You are a research assistant. Extract relevant news/articles from raw search results. "
+            "Return a JSON array. Each item: "
+            "{title, url, source, source_name, published_at, summary, relevance_score}. "
+            "Only include items clearly relevant to the user's query. relevance_score 0.0-1.0. "
+            "If none qualify, return []."
+        )
+        user_prompt = (
+            f"Query: {body.query}\n\n"
+            f"Raw results:\n{json.dumps(raw, indent=2)}\n\n"
+            "Return a JSON array of the most relevant articles."
+        )
+        client = get_ai_client(AI_PROVIDER)
+        response_text, _ = call_ai(
+            client, system, user_prompt,
+            model_tier=SCRAPER_MODEL, max_tokens=4000, provider=AI_PROVIDER,
+        )
+        try:
+            articles = parse_json_response(response_text)
+            return [a for a in articles if isinstance(a, dict) and a.get("relevance_score", 0) >= 0.4]
+        except Exception:
+            return []
+
+    except Exception as e:
+        print(f"[CustomSearch] Unhandled error: {e}")
+        return []  # Always valid JSON — frontend never sees "Search failed"
+
+
+@app.post("/api/feedback")
+async def submit_feedback(body: FeedbackRequest, db: Session = Depends(get_db)):
+    existing = db.query(ArticleFeedback).filter(ArticleFeedback.article_url == body.url).first()
+    if existing:
+        existing.rating   = body.rating
+        existing.country  = body.country
+        existing.category = body.category
+    else:
+        db.add(ArticleFeedback(
+            article_url=body.url, article_title=body.title,
+            rating=body.rating, country=body.country,
+            category=body.category, run_id=body.run_id,
+        ))
+    db.commit()
+    return {"success": True}
+
+
+@app.get("/api/tuning/feedback")
+async def get_tuning_feedback(db: Session = Depends(get_db)):
+    items = db.query(ArticleFeedback).order_by(ArticleFeedback.created_at.desc()).limit(500).all()
+    counts = {"relevant": 0, "noise": 0, "critical_miss": 0}
+    for i in items:
+        if i.rating in counts:
+            counts[i.rating] += 1
+    return {
+        "stats": {**counts, "total": len(items)},
+        "items": [{"url": i.article_url, "title": i.article_title,
+                   "rating": i.rating, "country": i.country,
+                   "category": i.category, "created_at": i.created_at.isoformat() if i.created_at else ""
+                  } for i in items],
+    }
+
+
+@app.get("/api/tuning/queries")
+async def get_query_performance(db: Session = Depends(get_db)):
+    """Compute query-source performance from the articles table."""
+    from sqlalchemy import func as sa_func, case as sa_case
+    impact_score = sa_case(
+        (NewsArticle.impact_level == "critical", 1.0),
+        (NewsArticle.impact_level == "high",     0.75),
+        (NewsArticle.impact_level == "medium",   0.5),
+        else_=0.25,
+    )
+    rows = (
+        db.query(
+            NewsArticle.source.label("source_type"),
+            sa_func.count().label("total"),
+            sa_func.sum(sa_case((NewsArticle.verified == True, 1), else_=0)).label("verified_count"),
+            sa_func.avg(impact_score).label("avg_impact"),
+        )
+        .filter(NewsArticle.source.isnot(None))
+        .group_by(NewsArticle.source)
+        .order_by(sa_func.avg(impact_score).desc())
+        .all()
+    )
+    SOURCE_LABELS = {
+        "tavily_t1": "Tier 1 (Sierra Leone / Bangladesh)",
+        "tavily_t2": "Tier 2 (Kenya / Rwanda / Ghana / India)",
+        "tavily_t3": "Tier 3 (Saudi / Tanzania / Bhutan / US)",
+        "linkedin_tavily": "LinkedIn Discussions",
+        "moh_site": "Ministry of Health Sites",
+        "official": "Official Pronouncements",
+        "donor": "Donor & Global Orgs",
+        "sentiment": "Social Sentiment",
+        "regulatory": "Regulatory / Market Access",
+        "budget": "Budget & Fiscal Cycle",
+        "reimbursement": "NCD Reimbursement / Pricing",
+        "clinical": "Clinical Domains (Medtronic LABS)",
+        "conference": "Conference Outcomes",
+        "officials": "Named Officials Monitoring",
+        "funding": "Funding & Grant Opportunities",
+        "pubmed": "PubMed Academic Evidence",
+        "world_bank": "World Bank Documents",
+        "who_iris": "WHO IRIS Repository",
+        "usaid_rss": "USAID Content",
+        "gates_rss": "Gates Foundation Content",
+        "news": "Google News RSS",
+        "web": "Web (DuckDuckGo / General)",
+        "twitter_api": "Twitter / X API",
+    }
+    result = []
+    for r in rows:
+        total = r.total or 0
+        ver   = int(r.verified_count or 0)
+        avg   = round(float(r.avg_impact or 0.25), 3)
+        grade = "good" if avg >= 0.65 else ("ok" if avg >= 0.45 else "poor")
+        result.append({
+            "source_type":  r.source_type,
+            "label":        SOURCE_LABELS.get(r.source_type, r.source_type),
+            "total":        total,
+            "verified":     ver,
+            "verify_pct":   round(ver / total * 100) if total else 0,
+            "avg_impact":   avg,
+            "grade":        grade,
+        })
+    return result
+
+
+@app.get("/api/tuning/sources")
+async def get_source_quality(db: Session = Depends(get_db)):
+    """Compute per-source-name quality metrics from the articles table."""
+    from sqlalchemy import func as sa_func, case as sa_case
+    impact_score = sa_case(
+        (NewsArticle.impact_level == "critical", 1.0),
+        (NewsArticle.impact_level == "high",     0.75),
+        (NewsArticle.impact_level == "medium",   0.5),
+        else_=0.25,
+    )
+    rows = (
+        db.query(
+            NewsArticle.source_name.label("source_name"),
+            sa_func.count().label("total"),
+            sa_func.avg(NewsArticle.verification_score).label("avg_ver"),
+            sa_func.avg(impact_score).label("avg_impact"),
+        )
+        .filter(NewsArticle.verified == True)
+        .filter(NewsArticle.source_name.isnot(None))
+        .filter(NewsArticle.source_name != "")
+        .group_by(NewsArticle.source_name)
+        .order_by(sa_func.avg(NewsArticle.verification_score).desc())
+        .all()
+    )
+    excluded = {e.source_name for e in db.query(SourceExclusion).all()}
+    # Feedback noise counts per source
+    fb_rows = db.query(ArticleFeedback.article_url, ArticleFeedback.rating).all()
+    # Map URL → rating
+    fb_map = {r.article_url: r.rating for r in fb_rows}
+    # Map source_name → noise count (via article lookup)
+    art_rows = db.query(NewsArticle.source_name, NewsArticle.url).filter(NewsArticle.verified == True).all()
+    noise_by_src: dict[str, int] = {}
+    for ar in art_rows:
+        if fb_map.get(ar.url) == "noise":
+            noise_by_src[ar.source_name] = noise_by_src.get(ar.source_name, 0) + 1
+    result = []
+    for r in rows:
+        sn = r.source_name
+        total = r.total or 0
+        avg_ver = round(float(r.avg_ver or 0), 3)
+        avg_imp = round(float(r.avg_impact or 0.25), 3)
+        noise_c = noise_by_src.get(sn, 0)
+        noise_rt = round(noise_c / total, 2) if total else 0
+        grade = "good" if avg_ver >= 0.7 else ("ok" if avg_ver >= 0.5 else "poor")
+        result.append({
+            "source_name": sn,
+            "total":       total,
+            "avg_ver":     avg_ver,
+            "avg_impact":  avg_imp,
+            "noise_count": noise_c,
+            "noise_rate":  noise_rt,
+            "excluded":    sn in excluded,
+            "grade":       grade,
+        })
+    return result
+
+
+@app.post("/api/tuning/sources/toggle")
+async def toggle_source_exclude(body: dict, db: Session = Depends(get_db)):
+    sn      = body.get("source_name", "")
+    exclude = body.get("exclude", True)
+    if not sn:
+        raise HTTPException(400, "source_name required")
+    existing = db.query(SourceExclusion).filter(SourceExclusion.source_name == sn).first()
+    if exclude and not existing:
+        db.add(SourceExclusion(source_name=sn))
+        db.commit()
+    elif not exclude and existing:
+        db.delete(existing)
+        db.commit()
+    return {"success": True, "source_name": sn, "excluded": exclude}
+
+
+# ── Curated Sources ─────────────────────────────────────────────────────────
+
+@app.get("/api/curated-sources")
+async def list_curated_sources(db: Session = Depends(get_db)):
+    rows = db.query(CuratedSource).order_by(CuratedSource.created_at.desc()).all()
+    return [
+        {"id": r.id, "name": r.name, "url": r.url, "source_type": r.source_type,
+         "active": r.active, "notes": r.notes,
+         "created_at": r.created_at.isoformat() if r.created_at else None}
+        for r in rows
+    ]
+
+
+@app.post("/api/curated-sources")
+async def add_curated_source(body: dict, db: Session = Depends(get_db)):
+    url = (body.get("url") or "").strip()
+    name = (body.get("name") or url).strip()
+    if not url:
+        raise HTTPException(400, "url required")
+    if db.query(CuratedSource).filter(CuratedSource.url == url).first():
+        raise HTTPException(409, "Source already exists")
+    src = CuratedSource(
+        name=name, url=url,
+        source_type=body.get("source_type", "site"),
+        notes=body.get("notes", ""),
+    )
+    db.add(src); db.commit(); db.refresh(src)
+    return {"id": src.id, "name": src.name, "url": src.url, "active": src.active}
+
+
+@app.delete("/api/curated-sources/{source_id}")
+async def delete_curated_source(source_id: int, db: Session = Depends(get_db)):
+    src = db.query(CuratedSource).filter(CuratedSource.id == source_id).first()
+    if not src:
+        raise HTTPException(404, "Not found")
+    db.delete(src); db.commit()
+    return {"deleted": source_id}
+
+
+@app.patch("/api/curated-sources/{source_id}/toggle")
+async def toggle_curated_source(source_id: int, db: Session = Depends(get_db)):
+    src = db.query(CuratedSource).filter(CuratedSource.id == source_id).first()
+    if not src:
+        raise HTTPException(404, "Not found")
+    src.active = not src.active; db.commit()
+    return {"id": src.id, "active": src.active}
+
+
+@app.get("/api/tuning/articles")
+async def get_articles_for_feedback(
+    limit: int = 30,
+    offset: int = 0,
+    country: Optional[str] = None,
+    impact_level: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Articles for the feedback tab — includes their current rating if rated."""
+    q = db.query(NewsArticle).filter(NewsArticle.verified == True)
+    if country:
+        q = q.filter(NewsArticle.countries_mentioned.cast(String).ilike(f"%{country}%"))
+    if impact_level:
+        q = q.filter(NewsArticle.impact_level == impact_level)
+    if search:
+        term = f"%{search}%"
+        q = q.filter(NewsArticle.title.ilike(term) | NewsArticle.source_name.ilike(term))
+    severity = case(
+        (NewsArticle.impact_level == "critical", 0),
+        (NewsArticle.impact_level == "high", 1),
+        (NewsArticle.impact_level == "medium", 2),
+        (NewsArticle.impact_level == "low", 3),
+        else_=4,
+    )
+    articles = q.order_by(severity, NewsArticle.created_at.desc()).offset(offset).limit(limit).all()
+    # Fetch ratings for these URLs
+    urls = [a.url for a in articles if a.url]
+    ratings_map = {}
+    if urls:
+        fbs = db.query(ArticleFeedback).filter(ArticleFeedback.article_url.in_(urls)).all()
+        ratings_map = {f.article_url: f.rating for f in fbs}
+    return [
+        {
+            "title":        a.title,
+            "url":          a.url,
+            "source_name":  a.source_name,
+            "impact_level": a.impact_level,
+            "countries_mentioned": a.countries_mentioned or [],
+            "category":     None,
+            "run_id":       a.run_id,
+            "created_at":   a.created_at.isoformat() if a.created_at else "",
+            "rating":       ratings_map.get(a.url),
+        }
+        for a in articles
+    ]
 
 
 @app.get("/api/executive-summary")
-async def get_executive_summary(db: Session = Depends(get_db)):
+async def get_executive_summary(
+    country: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     """
     Returns executive-ready impact summary for the most recent completed run.
     Powers the Executive Pulse section on the dashboard.
+    Optional ?country= filters all stats and alerts to that country only.
     """
     last_run = (
         db.query(AgentRun)
@@ -518,11 +856,13 @@ async def get_executive_summary(db: Session = Depends(get_db)):
             "recommended_actions": [], "total_articles": 0,
         }
 
-    articles = (
+    q = (
         db.query(NewsArticle)
         .filter(NewsArticle.run_id == last_run.run_id, NewsArticle.verified == True)
-        .all()
     )
+    if country:
+        q = q.filter(NewsArticle.countries_mentioned.cast(String).ilike(f"%{country}%"))
+    articles = q.all()
 
     distribution = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unclassified": 0}
     for a in articles:
@@ -570,9 +910,26 @@ async def get_executive_summary(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/articles/country-counts")
+async def get_article_country_counts(db: Session = Depends(get_db)):
+    """Returns total verified article count per target country (no cap)."""
+    from backend.config import TARGET_COUNTRIES
+    result = {}
+    for country in TARGET_COUNTRIES:
+        result[country] = (
+            db.query(func.count(NewsArticle.id))
+            .filter(
+                NewsArticle.verified == True,
+                NewsArticle.countries_mentioned.cast(String).ilike(f"%{country}%"),
+            )
+            .scalar() or 0
+        )
+    return result
+
+
 @app.get("/api/articles")
 async def get_articles(
-    limit: int = 20,
+    limit: int = 50,
     source: Optional[str] = None,
     search: Optional[str] = None,
     date_from: Optional[date] = None,
@@ -602,15 +959,12 @@ async def get_articles(
     if date_to:
         query = query.filter(NewsArticle.created_at <= datetime.combine(date_to, datetime.max.time()))
 
-    # Default sort: impact severity first, then newest
-    severity = case(
-        (NewsArticle.impact_level == "critical", 0),
-        (NewsArticle.impact_level == "high", 1),
-        (NewsArticle.impact_level == "medium", 2),
-        (NewsArticle.impact_level == "low", 3),
-        else_=4,
-    )
-    articles = query.order_by(severity, NewsArticle.created_at.desc()).limit(limit).all()
+    # Default sort: most recently published first; fall back to scrape date when no publish date
+    from sqlalchemy import nullslast
+    articles = query.order_by(
+        nullslast(NewsArticle.published_at.desc()),
+        NewsArticle.created_at.desc(),
+    ).limit(limit).all()
 
     return [
         {
@@ -628,7 +982,10 @@ async def get_articles(
             "impact_rationale": a.impact_rationale,
             "recommended_action": a.recommended_action,
             "countries_mentioned": a.countries_mentioned or [],
-            "category": None,  # enriched in enricher; not persisted separately yet
+            "source_diversity_score": a.source_diversity_score,
+            "is_continuation_story": a.is_continuation_story or False,
+            "continuation_of": a.continuation_of,
+            "category": None,
         }
         for a in articles
     ]

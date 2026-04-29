@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Any
 from sqlalchemy.orm import Session
 
-from backend.database import AgentRun, AgentStep, NewsArticle, SessionLocal
+from backend.database import AgentRun, AgentStep, NewsArticle, SessionLocal, SourceExclusion
 from backend.agents.scraper_agent import run_scraper
 from backend.agents.verifier_agent import run_verifier
 from backend.agents.enricher_agent import run_enricher
@@ -87,8 +87,11 @@ def save_articles(db: Session, run_id: str, articles: list[dict]):
             rec.impact_rationale    = a.get("impact_rationale", rec.impact_rationale)
             rec.recommended_action  = a.get("recommended_action", rec.recommended_action)
             rec.executive_headline  = a.get("executive_headline", rec.executive_headline)
-            rec.sentiment_signal    = a.get("sentiment_signal", rec.sentiment_signal)
-            rec.is_official         = a.get("is_official", rec.is_official)
+            rec.sentiment_signal          = a.get("sentiment_signal", rec.sentiment_signal)
+            rec.is_official               = a.get("is_official", rec.is_official)
+            rec.source_diversity_score    = a.get("source_diversity_score", rec.source_diversity_score)
+            rec.is_continuation_story     = a.get("is_continuation_story", rec.is_continuation_story)
+            rec.continuation_of           = a.get("continuation_of", rec.continuation_of)
         else:
             db.add(NewsArticle(
                 run_id=run_id,
@@ -110,6 +113,9 @@ def save_articles(db: Session, run_id: str, articles: list[dict]):
                 executive_headline=a.get("executive_headline"),
                 sentiment_signal=a.get("sentiment_signal"),
                 is_official=a.get("is_official", False),
+                source_diversity_score=a.get("source_diversity_score"),
+                is_continuation_story=a.get("is_continuation_story", False),
+                continuation_of=a.get("continuation_of"),
             ))
     db.commit()
 
@@ -119,6 +125,9 @@ async def run_pipeline(
     trigger: str = "scheduled",
     extra_instructions: str = "",
     country_filter: str | None = None,
+    country_filters: list[str] | None = None,
+    pipeline_mode: str = "full",
+    lookback_days: int = 7,
     websocket_callback: Callable | None = None,
     db: Session | None = None,
 ) -> dict[str, Any]:
@@ -155,7 +164,18 @@ async def run_pipeline(
         scrape_msg = f"Collecting news for {country_filter}..." if country_filter else "Collecting news from social media and web..."
         await emit({"step": "scraper", "status": "running", "message": scrape_msg})
 
-        scraper_result = await run_scraper(run_id, websocket_callback, country_filter=country_filter)
+        # For multi-country, pick the active filter; None = full run covering all countries
+        active_filter = country_filter
+        if country_filters and len(country_filters) == 1:
+            active_filter = country_filters[0]
+
+        scraper_result = await run_scraper(
+            run_id,
+            websocket_callback,
+            country_filter=active_filter,
+            country_filters=country_filters if (country_filters and len(country_filters) > 1) else None,
+            lookback_days=lookback_days,
+        )
         articles = scraper_result["articles"]
         total_tokens += scraper_result["tokens_used"]
 
@@ -169,6 +189,42 @@ async def run_pipeline(
         }
         new_articles = [a for a in articles if a.get("url", "") not in existing_urls]
         duplicate_count = len(articles) - len(new_articles)
+
+        # Filter out articles from user-excluded sources
+        excluded_src_names: set[str] = {
+            row.source_name
+            for row in db.query(SourceExclusion.source_name).all()
+        }
+        if excluded_src_names:
+            before = len(new_articles)
+            new_articles = [a for a in new_articles if a.get("source_name","") not in excluded_src_names]
+            excl_count = before - len(new_articles)
+            if excl_count:
+                await emit({"step":"scraper","message":f"Filtered {excl_count} articles from excluded sources"})
+
+        # Hard date filter — drop articles published before the lookback window.
+        # Tavily's `days` param is a hint; it regularly returns older indexed content.
+        # Articles with no parseable date are kept (undated fresh content passes through).
+        cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+        date_filtered_count = 0
+        kept = []
+        for a in new_articles:
+            pub = a.get("published_at") or ""
+            parsed = None
+            for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d",
+                        "%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S GMT"):
+                try:
+                    parsed = datetime.strptime(pub[:25], fmt)
+                    break
+                except (ValueError, TypeError):
+                    continue
+            if parsed is None or parsed.replace(tzinfo=None) >= cutoff:
+                kept.append(a)
+            else:
+                date_filtered_count += 1
+        new_articles = kept
+        if date_filtered_count:
+            await emit({"step": "scraper", "message": f"Dropped {date_filtered_count} articles older than {lookback_days} days"})
 
         save_articles(db, run_id, new_articles)   # live: show new articles immediately
         update_step(db, run_id, "scraper", "completed",
@@ -214,6 +270,21 @@ async def run_pipeline(
                     "data": {"verified": len(verified_articles), "rejected": verifier_result["rejected_count"]}})
         await emit({"step": "articles_updated", "message": "Articles updated with verification scores"})
 
+        # ─── QUICK MODE: stop after verification ─────────────────────────────
+        if pipeline_mode == "quick":
+            for step in ["enricher", "impact", "writer", "pdf_generator", "email_sender"]:
+                update_step(db, run_id, step, "completed", output={"skipped": True, "reason": "quick mode"})
+            run.status = "completed"
+            run.finished_at = datetime.utcnow()
+            db.commit()
+            await emit({"step": "pipeline", "status": "completed",
+                        "message": f"Quick check complete — {len(verified_articles)} verified articles ready. Total tokens: {total_tokens}",
+                        "data": {"run_id": run_id, "total_tokens": total_tokens}})
+            if close_db:
+                db.close()
+            return {"run_id": run_id, "status": "completed", "report": None,
+                    "pdf_path": None, "total_tokens": total_tokens, "article_count": len(verified_articles)}
+
         if not verified_articles:
             raise ValueError("No articles passed verification. Lowering MIN_VERIFICATION_SCORE may help.")
 
@@ -221,7 +292,25 @@ async def run_pipeline(
         update_step(db, run_id, "enricher", "running")
         await emit({"step": "enricher", "status": "running", "message": "Enriching articles with context and follow-up links..."})
 
-        enricher_result = await run_enricher(verified_articles, run_id, websocket_callback)
+        # Fetch recent article titles from last 30 days for thematic continuity (Gap 10)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        recent_rows = (
+            db.query(NewsArticle.title)
+            .filter(
+                NewsArticle.verified == True,
+                NewsArticle.run_id != run_id,
+                NewsArticle.created_at >= thirty_days_ago,
+                NewsArticle.title.isnot(None),
+            )
+            .limit(200)
+            .all()
+        )
+        recent_titles = [row.title for row in recent_rows if row.title]
+
+        enricher_result = await run_enricher(
+            verified_articles, run_id, websocket_callback,
+            recent_article_titles=recent_titles,
+        )
         enriched_articles = enricher_result["enriched_articles"]
         total_tokens += enricher_result["tokens_used"]
         save_articles(db, run_id, enriched_articles)

@@ -26,21 +26,40 @@ TIER_LABELS.update({c: "Tier 3" for c in COUNTRIES_TIER3})
 
 
 def group_by_country(articles: list[dict]) -> dict[str, list]:
-    """Group articles under each target country they mention."""
+    """
+    Group articles under their target countries.
+    Uses primary_country (single authoritative placement) when set;
+    falls back to countries_mentioned for genuine multi-country articles;
+    final fallback is a title/content keyword scan (first match only).
+    An article is never placed under more countries than it is substantively about.
+    """
     by_country: dict[str, list] = {c: [] for c in TARGET_COUNTRIES}
     for article in articles:
+        # 1. Enricher-assigned primary country — definitive single placement
+        primary = article.get("primary_country", "")
+        if primary and primary in by_country:
+            by_country[primary].append(article)
+            continue
+
+        # 2. countries_mentioned — should only list countries the article is about
         mentioned = article.get("countries_mentioned") or []
         placed = False
-        for country in TARGET_COUNTRIES:   # iterate in priority order
+        for country in TARGET_COUNTRIES:   # priority order: Tier1 → Tier2 → Tier3
             if country in mentioned:
                 by_country[country].append(article)
                 placed = True
+                # Do NOT break — a genuinely multi-country article (e.g. Kenya + Rwanda
+                # joint programme) should appear under all relevant countries.
+                # The enricher is responsible for keeping this list tight (≤2 entries).
+
         if not placed:
-            # Try fuzzy match on title/content
-            text = (article.get("title", "") + " " + article.get("raw_content", "")).lower()
+            # 3. Fuzzy fallback — first matching country in title only (not full raw_content
+            #    which often contains country mentions from unrelated context)
+            title_text = article.get("title", "").lower()
             for country in TARGET_COUNTRIES:
-                if country.lower() in text:
+                if country.lower() in title_text:
                     by_country[country].append(article)
+                    break   # title match = strong signal; one country only
     return by_country
 
 
