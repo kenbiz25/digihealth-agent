@@ -491,6 +491,34 @@ label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase
 .cs-badge.rss{background:rgba(31,136,61,.12);color:var(--green)}
 .cs-badge.keyword{background:rgba(188,76,0,.12);color:var(--high)}
 .cs-inactive{opacity:.4}
+
+/* ── Account panel ─────────────────────────────────────────────────────── */
+#acct-overlay{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s}
+#acct-overlay.open{opacity:1;pointer-events:auto}
+#acct-panel{position:fixed;top:0;right:0;bottom:0;z-index:3001;width:min(420px,100vw);background:var(--surface);border-left:1px solid var(--border);box-shadow:-8px 0 32px rgba(0,0,0,.12);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#acct-panel.open{transform:translateX(0)}
+.acct-header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+.acct-header h2{font-size:15px;font-weight:700;color:var(--text);margin:0}
+.acct-body{flex:1;overflow-y:auto;padding:20px}
+.acct-section{margin-bottom:28px}
+.acct-section-title{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--text2);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border2)}
+.acct-field{margin-bottom:14px}
+.acct-field label{display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:5px}
+.acct-field input,.acct-field select{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:var(--surface2);outline:none;transition:border-color .15s}
+.acct-field input:focus,.acct-field select:focus{border-color:var(--accent)}
+.acct-field input[readonly]{opacity:.6;cursor:default}
+.acct-field input[readonly]:focus{border-color:var(--border)}
+.acct-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.acct-save{width:100%;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
+.acct-save:hover{background:var(--accent-hover,#3B38D5)}
+.acct-save:disabled{opacity:.5;cursor:not-allowed}
+.acct-hint{font-size:11px;color:var(--text2);margin-top:4px}
+.acct-toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.acct-toggle-row label{font-size:13px;font-weight:500;color:var(--text);cursor:pointer}
+.day-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.day-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 11px;border:1.5px solid var(--border);border-radius:20px;font-size:12px;font-weight:500;color:var(--text2);cursor:pointer;user-select:none;transition:all .15s}
+.day-chip input[type=checkbox]{display:none}
+.day-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
 </style>
 </head>
 <body>
@@ -526,10 +554,16 @@ label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase
   </nav>
 
   <div class="topbar-right">
+    <button class="icon-btn" id="topbar-username" onclick="openAccountPanel()" title="Account settings" style="font-size:12px;color:var(--text2);font-weight:500;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;padding:4px 6px;border-radius:6px">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.561 8.073a6.005 6.005 0 0 1 3.432 5.142.75.75 0 1 1-1.498.07 4.5 4.5 0 0 0-8.99 0 .75.75 0 0 1-1.498-.07 6.004 6.004 0 0 1 3.431-5.142 3.999 3.999 0 1 1 5.123 0ZM10.5 5a2.5 2.5 0 1 0-5 0 2.5 2.5 0 0 0 5 0Z"/></svg>
+      <span id="topbar-username-text"></span>
+    </button>
     <!-- theme toggle -->
     <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark">
       <span id="theme-icon">🌙</span>
     </button>
+    <!-- logout -->
+    <button class="icon-btn" onclick="handleLogout()" title="Sign out" style="font-size:13px">⏻</button>
     <!-- WS status -->
     <div class="ws-dot" id="ws-dot" title="Live connection"></div>
   </div>
@@ -616,9 +650,13 @@ label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase
   </div>
 
   <div class="sb-card">
-    <div class="sb-title">Next Run</div>
+    <div class="sb-title">Pipeline Schedule</div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:2px">Last run</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:10px" id="last-run">—</div>
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:2px">Next run</div>
     <div style="font-size:11px;color:var(--text2)" id="next-run">Loading...</div>
-    <div style="font-size:10px;color:var(--text3);margin-top:5px;line-height:1.6" id="key-status"></div>
+    <div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:4px" id="next-run-countdown"></div>
+    <div style="font-size:10px;color:var(--text3);margin-top:6px;line-height:1.6" id="key-status"></div>
   </div>
 </aside>
 
@@ -922,6 +960,7 @@ label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase
     <button class="tune-tab" id="tt-queries"  onclick="showTuneTab('queries')">Query Performance</button>
     <button class="tune-tab" id="tt-sources"  onclick="showTuneTab('sources')">Source Quality</button>
     <button class="tune-tab" id="tt-curated"  onclick="showTuneTab('curated')">Curated Sources</button>
+    <button class="tune-tab" id="tt-email"    onclick="showTuneTab('email')">Email Settings</button>
   </div>
 
   <!-- ── TAB: Article Feedback ─────────────────────────────────────── -->
@@ -1016,6 +1055,67 @@ label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase
     </div>
   </div>
 
+  <!-- ── TAB: Email Settings ──────────────────────────────────────────── -->
+  <div id="tab-email" style="display:none">
+    <div class="card" style="max-width:540px">
+      <div class="card-hd" style="margin-bottom:18px">
+        <div>
+          <div class="card-title">Email digest preferences</div>
+          <div class="card-sub">Choose when you receive intelligence updates</div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <input type="checkbox" id="ep-enabled" style="width:15px;height:15px;accent-color:var(--accent)" onchange="toggleEpScheduled()">
+        <label for="ep-enabled" style="font-size:13px;font-weight:500;color:var(--text);cursor:pointer">Enable email digest</label>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Send timing</label>
+        <select id="ep-frequency" style="width:100%;padding:9px 12px;font-size:13px" onchange="toggleEpScheduled()">
+          <option value="after_run">After every pipeline run</option>
+          <option value="scheduled">At a fixed scheduled time</option>
+        </select>
+      </div>
+
+      <div id="ep-schedule-row" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Hour</label>
+          <select id="ep-hour" style="width:100%;padding:9px 12px;font-size:13px">
+            ${Array.from({length:24},(_,i)=>`<option value="${i}">${String(i).padStart(2,'0')}:00</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Day</label>
+          <select id="ep-day" style="width:100%;padding:9px 12px;font-size:13px">
+            <option value="daily">Every day</option>
+            <option value="mon">Monday</option>
+            <option value="tue">Tuesday</option>
+            <option value="wed">Wednesday</option>
+            <option value="thu">Thursday</option>
+            <option value="fri">Friday</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Timezone</label>
+          <select id="ep-tz" style="width:100%;padding:9px 12px;font-size:13px">
+            <option value="Africa/Nairobi">Nairobi (EAT)</option>
+            <option value="Africa/Lagos">Lagos (WAT)</option>
+            <option value="Africa/Accra">Accra (GMT)</option>
+            <option value="Africa/Johannesburg">Johannesburg (SAST)</option>
+            <option value="Asia/Kolkata">India (IST)</option>
+            <option value="Asia/Dhaka">Dhaka (BST)</option>
+            <option value="America/New_York">New York (EST)</option>
+            <option value="Europe/London">London (GMT/BST)</option>
+          </select>
+        </div>
+      </div>
+      <input type="hidden" id="ep-minute" value="0"/>
+
+      <button class="btn btn-primary" id="btn-save-ep" onclick="saveEmailPrefs()" style="margin-top:4px">Save preferences</button>
+    </div>
+  </div>
+
 </div>
 </div>
 
@@ -1074,6 +1174,7 @@ function toggleTheme() {
 
 // ── Init ──────────────────────────────────────────────────────────────────
 window.addEventListener('load', () => {
+  checkAuth();
   initPipelineFlow();
   connectWS();
   loadStatus();
@@ -1172,14 +1273,14 @@ function handleWSMessage(data) {
     if (btn) { btn.disabled=false; btn.innerHTML=`<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z"/></svg> Run Now`; }
     setBadge(status);
     if (status === 'completed') {
-      loadStatus(); loadRuns(); loadArticles(); loadExecutiveSummary();
+      refreshAllPages();
       if (extra?.pdf_path && currentRunId) {
         const lk=document.getElementById('last-pdf-link'), a=document.getElementById('pdf-download-link');
         if(lk){lk.style.display='flex'} if(a) a.href=`/api/runs/${currentRunId}/pdf?inline=false`;
       }
     }
   }
-  if (step === 'articles_updated') { loadArticles(); loadStatus(); return; }
+  if (step === 'articles_updated') { refreshAllPages(); return; }
   if (step === 'request' && status === 'completed' && extra) {
     appendRequestResponse(extra);
     const rid = document.getElementById('request-run-select')?.value;
@@ -1197,7 +1298,117 @@ function appendLog(step, message, status) {
 }
 function clearLog() { document.getElementById('log-container').innerHTML = ''; }
 
+// ── Refresh all pages after a completed run ───────────────────────────────
+function refreshAllPages() {
+  loadStatus();
+  loadRuns();
+  loadArticles();
+  loadExecutiveSummary();
+  loadSpotlight();
+  // Refresh blog only if it's currently visible (it re-generates — expensive)
+  if (document.getElementById('page-blog')?.classList.contains('active')) {
+    generateBlog();
+  }
+}
+
+// ── Auth check — redirect to login if not authenticated ───────────────────
+async function handleLogout() {
+  await fetch('/auth/logout', {method:'POST', credentials:'include'});
+  window.location.href = '/login';
+}
+
+async function checkAuth() {
+  try {
+    const r = await fetch('/auth/me', {credentials: 'include'});
+    if (r.status === 401 || r.status === 403) {
+      window.location.href = '/login';
+      return false;
+    }
+    const user = await r.json();
+    const el = document.getElementById('topbar-username-text');
+    if (el) el.textContent = (user.name || user.email).split(' ')[0];
+    window._currentUser = user;
+    return true;
+  } catch {
+    return true; // network error — don't block the app
+  }
+}
+
+// ── Email preferences ─────────────────────────────────────────────────────
+async function loadEmailPrefs() {
+  try {
+    const d = await (await fetch('/api/email-preferences', {credentials:'include'})).json();
+    const set = (id, val) => { const e=document.getElementById(id); if(e) e.value=val; };
+    const chk = (id, val) => { const e=document.getElementById(id); if(e) e.checked=val; };
+    chk('ep-enabled', d.enabled);
+    set('ep-frequency', d.frequency);
+    set('ep-hour', String(d.send_hour).padStart(2,'0'));
+    set('ep-minute', String(d.send_minute).padStart(2,'0'));
+    set('ep-day', d.day_of_week);
+    set('ep-tz', d.timezone);
+    toggleEpScheduled();
+  } catch {}
+}
+
+async function saveEmailPrefs() {
+  const btn = document.getElementById('btn-save-ep');
+  if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
+  try {
+    const body = {
+      enabled:    document.getElementById('ep-enabled')?.checked ?? true,
+      frequency:  document.getElementById('ep-frequency')?.value || 'after_run',
+      send_hour:  parseInt(document.getElementById('ep-hour')?.value||'7'),
+      send_minute:parseInt(document.getElementById('ep-minute')?.value||'0'),
+      day_of_week:document.getElementById('ep-day')?.value || 'daily',
+      timezone:   document.getElementById('ep-tz')?.value || 'Africa/Nairobi',
+    };
+    const r = await fetch('/api/email-preferences', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      credentials:'include', body:JSON.stringify(body)
+    });
+    if (r.ok) { if(btn){btn.textContent='Saved ✓'; setTimeout(()=>{btn.textContent='Save preferences';btn.disabled=false;},1800); } }
+    else { if(btn){btn.disabled=false;btn.textContent='Save preferences';} }
+  } catch { if(btn){btn.disabled=false;btn.textContent='Save preferences';} }
+}
+
+function toggleEpScheduled() {
+  const freq = document.getElementById('ep-frequency')?.value;
+  const row = document.getElementById('ep-schedule-row');
+  if (row) row.style.display = freq === 'scheduled' ? 'grid' : 'none';
+}
+
 // ── API ───────────────────────────────────────────────────────────────────
+let _nextRunDate = null;
+
+function _fmtRunTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function _startCountdown() {
+  const el = document.getElementById('next-run-countdown');
+  if (!el) return;
+  clearInterval(window._cdTimer);
+  window._cdTimer = setInterval(() => {
+    if (!_nextRunDate) { el.textContent = ''; return; }
+    const diff = Math.max(0, _nextRunDate - Date.now());
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    el.textContent = diff === 0 ? 'Running now…' : `in ${h}h ${m}m`;
+  }, 30000);
+  window._cdTimer && clearInterval(window._cdTimer); // reset to fire immediately
+  const diff = Math.max(0, _nextRunDate - Date.now());
+  const h = Math.floor(diff / 3600000), m = Math.floor((diff % 3600000) / 60000);
+  el.textContent = diff === 0 ? 'Running now…' : `in ${h}h ${m}m`;
+  window._cdTimer = setInterval(() => {
+    if (!_nextRunDate) { el.textContent=''; return; }
+    const df = Math.max(0, _nextRunDate - Date.now());
+    const hh = Math.floor(df/3600000), mm = Math.floor((df%3600000)/60000);
+    el.textContent = df === 0 ? 'Running now…' : `in ${hh}h ${mm}m`;
+  }, 60000);
+}
+
 async function loadStatus() {
   try {
     const d = await (await fetch('/api/status')).json();
@@ -1205,7 +1416,14 @@ async function loadStatus() {
     document.getElementById('stat-schedule').textContent = d.schedule?.split(' ')[0] || '07:00';
     document.getElementById('stat-articles').textContent = d.total_articles ?? 0;
     if (d.total_runs !== undefined) document.getElementById('stat-runs').textContent = d.total_runs;
+    // Last / Next run
+    const lastEl = document.getElementById('last-run');
+    if (lastEl) lastEl.textContent = d.last_run?.started_at ? _fmtRunTime(d.last_run.started_at) : '—';
     document.getElementById('next-run').textContent = d.next_run || 'Not scheduled';
+    if (d.next_run && d.next_run !== 'Not scheduled') {
+      _nextRunDate = new Date(d.next_run).getTime();
+      _startCountdown();
+    }
     if (d.last_run?.pdf_path && d.last_run?.run_id) {
       const lk=document.getElementById('last-pdf-link'),a=document.getElementById('pdf-download-link');
       if(lk) lk.style.display='flex'; if(a) a.href=`/api/runs/${d.last_run.run_id}/pdf?inline=false`;
@@ -1692,9 +1910,13 @@ function showTuneTab(tab) {
     document.getElementById('tune-pane-'+t).style.display = t===tab?'':'none';
     document.getElementById('tt-'+t).classList.toggle('active', t===tab);
   });
+  const emailPane = document.getElementById('tab-email');
+  if (emailPane) emailPane.style.display = tab==='email' ? '' : 'none';
+  document.getElementById('tt-email').classList.toggle('active', tab==='email');
   if (tab === 'queries')  loadQueryPerf();
   if (tab === 'sources')  loadSourceQual();
   if (tab === 'curated')  loadCuratedSources();
+  if (tab === 'email')    loadEmailPrefs();
 }
 
 async function loadTuning() {
@@ -2030,6 +2252,264 @@ function renderGroupedArticles(articles) {
       </div>
     </div>`;
   }).join('') || '<div class="empty"><div class="empty-icon">📰</div>No articles yet.</div>';
+}
+</script>
+
+<!-- ══════════ ACCOUNT SETTINGS PANEL ══════════ -->
+<div id="acct-overlay" onclick="closeAccountPanel()"></div>
+<div id="acct-panel" role="dialog" aria-label="Account settings">
+  <div class="acct-header">
+    <h2>Account settings</h2>
+    <button class="icon-btn" onclick="closeAccountPanel()" title="Close" style="font-size:16px">✕</button>
+  </div>
+  <div class="acct-body">
+
+    <!-- Profile section -->
+    <div class="acct-section">
+      <div class="acct-section-title">Profile</div>
+
+      <div class="acct-field">
+        <label>Full name</label>
+        <input type="text" id="ap-name" readonly/>
+      </div>
+      <div class="acct-field">
+        <label>Work email</label>
+        <input type="email" id="ap-email" readonly/>
+      </div>
+      <div class="acct-row2">
+        <div class="acct-field">
+          <label>Title / Position</label>
+          <input type="text" id="ap-title" placeholder="Program Manager"/>
+        </div>
+        <div class="acct-field">
+          <label>Phone number</label>
+          <input type="tel" id="ap-phone" placeholder="+254 700 000 000"/>
+        </div>
+      </div>
+      <div class="acct-field">
+        <label>Country</label>
+        <select id="ap-country" onchange="apCountryChanged()">
+          <option value="">Select country</option>
+          <option>Kenya</option><option>Rwanda</option><option>Ghana</option>
+          <option>Sierra Leone</option><option>Tanzania</option><option>Uganda</option>
+          <option>Ethiopia</option><option>Nigeria</option><option>Senegal</option>
+          <option>Zambia</option><option>Malawi</option><option>Zimbabwe</option>
+          <option>South Africa</option><option>Bangladesh</option><option>India</option>
+          <option>Bhutan</option><option>Nepal</option><option>Pakistan</option>
+          <option>Saudi Arabia</option><option>United States</option>
+          <option>United Kingdom</option><option>Netherlands</option>
+          <option>Switzerland</option><option>Other</option>
+        </select>
+      </div>
+      <div id="ap-prof-msg" style="font-size:12px;color:var(--green);display:none;margin-bottom:10px">Profile saved ✓</div>
+      <button class="acct-save" id="ap-prof-btn" onclick="saveAccountProfile()">Save profile</button>
+    </div>
+
+    <!-- Email preferences section -->
+    <div class="acct-section">
+      <div class="acct-section-title">Email digest preferences</div>
+      <div class="acct-hint" style="margin-bottom:14px">Each digest includes the latest intelligence report PDF. Emails go to your registered work email. Enable below to opt in — nothing is sent until you save.</div>
+
+      <div class="acct-toggle-row">
+        <input type="checkbox" id="ap-ep-enabled" style="width:15px;height:15px;accent-color:var(--accent)" onchange="toggleApEpScheduled()">
+        <label for="ap-ep-enabled">Enable email digests</label>
+      </div>
+
+      <div class="acct-field">
+        <label>Send timing</label>
+        <select id="ap-ep-frequency" onchange="toggleApEpScheduled()">
+          <option value="after_run">After every pipeline run</option>
+          <option value="scheduled">At a fixed scheduled time</option>
+        </select>
+      </div>
+
+      <div id="ap-ep-schedule-row" style="display:none">
+        <div class="acct-field" style="margin-bottom:12px">
+          <label>Hour</label>
+          <select id="ap-ep-hour"></select>
+        </div>
+        <div class="acct-field" style="margin-bottom:12px">
+          <label>Days</label>
+          <div class="day-chips" id="ap-ep-days">
+            <label class="day-chip"><input type="checkbox" value="mon"> Mon</label>
+            <label class="day-chip"><input type="checkbox" value="tue"> Tue</label>
+            <label class="day-chip"><input type="checkbox" value="wed"> Wed</label>
+            <label class="day-chip"><input type="checkbox" value="thu"> Thu</label>
+            <label class="day-chip"><input type="checkbox" value="fri"> Fri</label>
+            <label class="day-chip"><input type="checkbox" value="sat"> Sat</label>
+            <label class="day-chip"><input type="checkbox" value="sun"> Sun</label>
+          </div>
+        </div>
+        <div class="acct-field">
+          <label>Timezone</label>
+          <select id="ap-ep-tz">
+            <option value="Africa/Nairobi">Nairobi / EAT (UTC+3) — KE, TZ, UG, RW, ET</option>
+            <option value="Africa/Lagos">Lagos / WAT (UTC+1) — NG, SN</option>
+            <option value="Africa/Accra">Accra / GMT (UTC+0) — GH, SL</option>
+            <option value="Africa/Johannesburg">Johannesburg / SAST (UTC+2) — ZA, ZM, MW, ZW</option>
+            <option value="Asia/Riyadh">Riyadh / AST (UTC+3) — SA</option>
+            <option value="Asia/Karachi">Karachi / PKT (UTC+5) — PK</option>
+            <option value="Asia/Kolkata">India / IST (UTC+5:30) — IN, NP</option>
+            <option value="Asia/Dhaka">Dhaka / BST (UTC+6) — BD, BT</option>
+            <option value="America/New_York">New York / ET (UTC-5/-4) — US</option>
+            <option value="Europe/London">London / GMT/BST (UTC+0/+1) — UK</option>
+            <option value="Europe/Amsterdam">Amsterdam / CET (UTC+1/+2) — NL, CH</option>
+          </select>
+        </div>
+      </div>
+      <input type="hidden" id="ap-ep-minute" value="0"/>
+
+      <div id="ap-ep-msg" style="font-size:12px;color:var(--green);display:none;margin-bottom:10px">Preferences saved ✓</div>
+      <button class="acct-save" id="ap-ep-btn" onclick="saveAccountEmailPrefs()">Save preferences</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// Populate hour select on load
+(function(){
+  const sel = document.getElementById('ap-ep-hour');
+  if (sel) for (let i=0;i<24;i++) {
+    const o = document.createElement('option');
+    o.value = i; o.textContent = String(i).padStart(2,'0')+':00';
+    sel.appendChild(o);
+  }
+})();
+
+function openAccountPanel() {
+  document.getElementById('acct-overlay').classList.add('open');
+  document.getElementById('acct-panel').classList.add('open');
+  loadAccountProfile();
+  loadAccountEmailPrefs();
+}
+
+function closeAccountPanel() {
+  document.getElementById('acct-overlay').classList.remove('open');
+  document.getElementById('acct-panel').classList.remove('open');
+}
+
+const _COUNTRY_TZ = {
+  'Kenya':'Africa/Nairobi','Tanzania':'Africa/Nairobi','Uganda':'Africa/Nairobi',
+  'Rwanda':'Africa/Nairobi','Ethiopia':'Africa/Nairobi',
+  'Nigeria':'Africa/Lagos','Senegal':'Africa/Lagos',
+  'Ghana':'Africa/Accra','Sierra Leone':'Africa/Accra',
+  'South Africa':'Africa/Johannesburg','Zambia':'Africa/Johannesburg',
+  'Malawi':'Africa/Johannesburg','Zimbabwe':'Africa/Johannesburg',
+  'Saudi Arabia':'Asia/Riyadh',
+  'Pakistan':'Asia/Karachi',
+  'India':'Asia/Kolkata','Nepal':'Asia/Kolkata',
+  'Bangladesh':'Asia/Dhaka','Bhutan':'Asia/Dhaka',
+  'United States':'America/New_York',
+  'United Kingdom':'Europe/London',
+  'Netherlands':'Europe/Amsterdam','Switzerland':'Europe/Amsterdam',
+};
+
+function apCountryChanged() {
+  const country = document.getElementById('ap-country')?.value;
+  const tz = _COUNTRY_TZ[country];
+  if (tz) {
+    const tzSel = document.getElementById('ap-ep-tz');
+    if (tzSel) tzSel.value = tz;
+  }
+}
+
+async function loadAccountProfile() {
+  try {
+    const u = window._currentUser || await (await fetch('/auth/me',{credentials:'include'})).json();
+    window._currentUser = u;
+    const s = (id,v) => { const e=document.getElementById(id); if(e) e.value=v||''; };
+    s('ap-name', u.name || u.full_name);
+    s('ap-email', u.email);
+    s('ap-title', u.title);
+    s('ap-phone', u.phone);
+    s('ap-country', u.country);
+  } catch {}
+}
+
+async function saveAccountProfile() {
+  const btn = document.getElementById('ap-prof-btn');
+  const msg = document.getElementById('ap-prof-msg');
+  btn.disabled = true; btn.textContent = 'Saving…'; msg.style.display='none';
+  try {
+    const r = await fetch('/api/profile', {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, credentials:'include',
+      body: JSON.stringify({
+        title:   document.getElementById('ap-title')?.value.trim() || '',
+        phone:   document.getElementById('ap-phone')?.value.trim() || '',
+        country: document.getElementById('ap-country')?.value || '',
+      }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      if (window._currentUser) {
+        window._currentUser.title   = d.title;
+        window._currentUser.phone   = d.phone;
+        window._currentUser.country = d.country;
+      }
+      msg.style.display='block';
+      setTimeout(()=>msg.style.display='none', 2500);
+    }
+  } catch {}
+  btn.disabled=false; btn.textContent='Save profile';
+}
+
+function _getCheckedDays() {
+  const boxes = document.querySelectorAll('#ap-ep-days input[type=checkbox]:checked');
+  const vals = [...boxes].map(b => b.value);
+  return vals.length ? vals.join(',') : 'daily';
+}
+
+function _setCheckedDays(dayStr) {
+  const days = (dayStr || 'daily').split(',').map(d => d.trim());
+  document.querySelectorAll('#ap-ep-days input[type=checkbox]').forEach(b => {
+    b.checked = days.includes(b.value);
+  });
+}
+
+async function loadAccountEmailPrefs() {
+  try {
+    const d = await (await fetch('/api/email-preferences',{credentials:'include'})).json();
+    const s=(id,v)=>{ const e=document.getElementById(id); if(e) e.value=String(v); };
+    const chk=(id,v)=>{ const e=document.getElementById(id); if(e) e.checked=v; };
+    chk('ap-ep-enabled', d.enabled);
+    s('ap-ep-frequency', d.frequency);
+    s('ap-ep-hour', d.send_hour);
+    s('ap-ep-minute', d.send_minute);
+    _setCheckedDays(d.day_of_week);
+    s('ap-ep-tz', d.timezone);
+    toggleApEpScheduled();
+  } catch {}
+}
+
+async function saveAccountEmailPrefs() {
+  const btn = document.getElementById('ap-ep-btn');
+  const msg = document.getElementById('ap-ep-msg');
+  btn.disabled=true; btn.textContent='Saving…'; msg.style.display='none';
+  try {
+    const r = await fetch('/api/email-preferences', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, credentials:'include',
+      body: JSON.stringify({
+        enabled:     document.getElementById('ap-ep-enabled')?.checked ?? false,
+        frequency:   document.getElementById('ap-ep-frequency')?.value || 'after_run',
+        send_hour:   parseInt(document.getElementById('ap-ep-hour')?.value || '7'),
+        send_minute: parseInt(document.getElementById('ap-ep-minute')?.value || '0'),
+        day_of_week: _getCheckedDays(),
+        timezone:    document.getElementById('ap-ep-tz')?.value || 'Africa/Nairobi',
+      }),
+    });
+    if (r.ok) {
+      msg.style.display='block';
+      setTimeout(()=>msg.style.display='none', 2500);
+    }
+  } catch {}
+  btn.disabled=false; btn.textContent='Save preferences';
+}
+
+function toggleApEpScheduled() {
+  const freq = document.getElementById('ap-ep-frequency')?.value;
+  const row  = document.getElementById('ap-ep-schedule-row');
+  if (row) row.style.display = freq === 'scheduled' ? 'block' : 'none';
 }
 </script>
 </body>

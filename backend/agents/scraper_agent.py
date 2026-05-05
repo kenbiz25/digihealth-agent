@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import Any
 from backend.config import (
-    TAVILY_API_KEY, TWITTER_BEARER_TOKEN, SERPER_API_KEY,
+    TAVILY_API_KEY, TAVILY_API_KEYS_LIST, TWITTER_BEARER_TOKEN, SERPER_API_KEY,
     SEARCH_QUERIES, SEARCH_QUERIES_TIER1, SEARCH_QUERIES_TIER2, SEARCH_QUERIES_TIER3,
     TWITTER_QUERIES, LINKEDIN_QUERIES, MOH_SITE_QUERIES, OFFICIAL_QUERIES, SENTIMENT_QUERIES, DONOR_QUERIES,
     REGULATORY_QUERIES, BUDGET_QUERIES, REIMBURSEMENT_NCD_QUERIES, CLINICAL_MEDTRONIC_QUERIES, CONFERENCE_QUERIES,
@@ -33,8 +33,17 @@ def _official_name(country: str) -> str:
     name = info.get("minister", "")
     return f'"{name}" {country}' if name else f"{country} Minister of Health"
 
-# Session-level flag: set True when Tavily returns 432 (quota exceeded)
-_tavily_quota_exceeded = False
+# Keys whose monthly quota is exhausted this session.  When all keys are in this
+# set the scraper falls back to free sources (Google News RSS / DuckDuckGo).
+_tavily_exhausted_keys: set[str] = set()
+
+
+def _get_active_tavily_key() -> str | None:
+    """Return the first key that has not been quota-exhausted, or None."""
+    for key in TAVILY_API_KEYS_LIST:
+        if key and key not in _tavily_exhausted_keys:
+            return key
+    return None
 
 # Semaphore limits concurrent DuckDuckGo calls (DDG blocks high concurrency)
 _ddg_semaphore: asyncio.Semaphore | None = None
@@ -170,13 +179,14 @@ Return a JSON array of news items. If no relevant items found, return [].
 
 
 async def search_tavily(query: str, topic: str = "general", days: int | None = None) -> list[dict]:
-    """Search using Tavily API. Detects quota exhaustion and sets session flag."""
-    global _tavily_quota_exceeded
-    if _tavily_quota_exceeded or not TAVILY_API_KEY:
-        return []
-    url = "https://api.tavily.com/search"
-    payload = {
-        "api_key": TAVILY_API_KEY,
+    """Search using Tavily API.
+
+    Cycles through all configured keys (TAVILY_API_KEYS) when one returns 429/432
+    (monthly quota exceeded).  Falls back to free sources once all keys are exhausted.
+    """
+    global _tavily_exhausted_keys
+    endpoint = "https://api.tavily.com/search"
+    base_payload = {
         "query": query,
         "search_depth": "advanced",
         "include_answer": False,
@@ -187,17 +197,28 @@ async def search_tavily(query: str, topic: str = "general", days: int | None = N
         "exclude_domains": ["msn.com", "yahoo.com", "allafrica.com", "feedspot.com", "flipboard.com"],
     }
     async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            r = await client.post(url, json=payload)
-            if r.status_code == 432:
-                _tavily_quota_exceeded = True
-                print("[Scraper] Tavily quota exceeded — switching to free search for this session")
+        for key in TAVILY_API_KEYS_LIST:
+            if not key or key in _tavily_exhausted_keys:
+                continue
+            try:
+                r = await client.post(endpoint, json={**base_payload, "api_key": key})
+                if r.status_code in (429, 432):
+                    _tavily_exhausted_keys.add(key)
+                    remaining = len(TAVILY_API_KEYS_LIST) - len(_tavily_exhausted_keys)
+                    print(f"[Scraper] Tavily key …{key[-8:]} quota exceeded — "
+                          f"{remaining} key(s) remaining")
+                    continue  # try next key
+                r.raise_for_status()
+                return r.json().get("results", [])
+            except httpx.HTTPStatusError:
                 return []
-            r.raise_for_status()
-            return r.json().get("results", [])
-        except Exception as e:
-            print(f"[Scraper] Tavily error for '{query}': {e}")
-            return []
+            except Exception as e:
+                print(f"[Scraper] Tavily error for '{query}': {e}")
+                return []
+    # All keys exhausted
+    if _tavily_exhausted_keys:
+        print("[Scraper] All Tavily keys quota-exhausted — falling back to free search")
+    return []
 
 
 async def search_google_news_rss(query: str, days: int | None = None) -> list[dict]:
@@ -272,7 +293,7 @@ async def search_web(query: str, topic: str = "general", days: int | None = None
       - topic='news' without site: → Google News RSS
       - topic='general' or site: query → DuckDuckGo
     """
-    if TAVILY_API_KEY and not _tavily_quota_exceeded:
+    if _get_active_tavily_key():
         return await search_tavily(query, topic, days=days)
     # Free fallback path
     if topic == "news" and "site:" not in query:
@@ -517,13 +538,14 @@ async def fetch_monitored_grant_urls(urls: list[str]) -> list[dict]:
         return []
     results: list[dict] = []
     # Try Tavily extract first (preserves structured content)
-    if TAVILY_API_KEY:
+    _extract_key = _get_active_tavily_key()
+    if _extract_key:
         async with httpx.AsyncClient(timeout=30) as client:
             for url in urls:
                 try:
                     resp = await client.post(
                         "https://api.tavily.com/extract",
-                        json={"api_key": TAVILY_API_KEY, "urls": [url]},
+                        json={"api_key": _extract_key, "urls": [url]},
                     )
                     resp.raise_for_status()
                     extracted = resp.json().get("results", [])
@@ -866,7 +888,7 @@ async def run_scraper(
         if len(tavily_plan) > MAX_TAVILY_CALLS:
             tavily_plan = tavily_plan[:MAX_TAVILY_CALLS]
 
-        if TAVILY_API_KEY:
+        if _get_active_tavily_key():
             for src_type, q, topic in tavily_plan:
                 search_tasks.append((src_type, q, search_web(q, topic)))
             sources_searched.append(f"Tavily ({len(tavily_plan)} queries, ≤{MAX_TAVILY_CALLS} cap)")
@@ -1067,7 +1089,7 @@ Return JSON array. Each item: {{title, url, source, source_name, published_at, r
     # Check each individual country — not just each tier — and run targeted
     # supplemental searches for any country with zero articles.
     # Tier 3 uses a lower relevance threshold (0.3) since coverage is thinner.
-    if not country_filter and TAVILY_API_KEY:
+    if not country_filter and _get_active_tavily_key():
 
         def _articles_for_country(country: str, arts: list[dict]) -> list:
             out = []

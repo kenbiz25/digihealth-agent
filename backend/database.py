@@ -1,3 +1,4 @@
+import hashlib, secrets
 from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, Boolean, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -117,6 +118,59 @@ class CuratedSource(Base):
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 
+class User(Base):
+    """Portal user accounts."""
+    __tablename__ = "users"
+    id            = Column(Integer, primary_key=True, index=True)
+    full_name     = Column(String, nullable=False)
+    email         = Column(String, unique=True, index=True, nullable=False)
+    phone         = Column(String, nullable=True)
+    title         = Column(String, nullable=True)
+    country       = Column(String, nullable=True)
+    password_hash = Column(String, nullable=False)
+    status        = Column(String, default="pending")   # pending | active | suspended
+    role          = Column(String, default="user")      # user | admin
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    last_login    = Column(DateTime, nullable=True)
+
+
+class UserSession(Base):
+    """Browser sessions for authenticated users."""
+    __tablename__ = "user_sessions"
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, index=True, nullable=False)
+    token      = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class EmailPreference(Base):
+    """Per-user email digest preferences."""
+    __tablename__ = "email_preferences"
+    id          = Column(Integer, primary_key=True, index=True)
+    user_id     = Column(Integer, unique=True, index=True, nullable=False)
+    enabled     = Column(Boolean, default=False)  # OFF until user explicitly opts in
+    # "after_run" = send immediately when pipeline finishes
+    # "scheduled" = send at a fixed time
+    frequency   = Column(String, default="after_run")
+    send_hour   = Column(Integer, default=7)    # 24h, used when frequency="scheduled"
+    send_minute = Column(Integer, default=0)
+    day_of_week = Column(String, default="mon") # mon|tue|...|sun|daily
+    timezone    = Column(String, default="Africa/Nairobi")
+    updated_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class PasswordResetToken(Base):
+    """Single-use tokens for password reset emails."""
+    __tablename__ = "password_reset_tokens"
+    id         = Column(Integer, primary_key=True, index=True)
+    user_id    = Column(Integer, index=True, nullable=False)
+    token      = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used       = Column(Boolean, default=False)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Safe migration: add new columns to existing databases without dropping data
@@ -140,6 +194,36 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass  # Column already exists — safe to ignore
+
+    # Safe migration: new tables (users, user_sessions, email_preferences)
+    # create_all above already handles brand-new databases; the blocks below
+    # add any columns that may be missing in older deployments.
+    _user_cols = [
+        ("phone",      "TEXT"),
+        ("title",      "TEXT"),
+        ("country",    "TEXT"),
+        ("last_login", "TEXT"),
+    ]
+    _session_cols: list = []          # all columns present at creation; nothing to backfill
+    _pref_cols = [
+        ("send_minute", "INTEGER DEFAULT 0"),
+        ("day_of_week", "TEXT DEFAULT 'mon'"),
+        ("timezone",    "TEXT DEFAULT 'Africa/Nairobi'"),
+        ("updated_at",  "TEXT"),
+    ]
+    _table_extra = [
+        ("users",            _user_cols),
+        ("user_sessions",    _session_cols),
+        ("email_preferences", _pref_cols),
+    ]
+    with engine.connect() as conn:
+        for table, cols in _table_extra:
+            for col_name, col_type in cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                except Exception:
+                    pass  # Column already exists — safe to ignore
 
 
 def get_db():

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, date
 from typing import Any, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks, Response, Cookie
 from sqlalchemy import case, func, String
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -25,8 +25,8 @@ from sqlalchemy.orm import Session
 from backend.config import (
     AI_PROVIDER, CLAUDE_MODELS, OPENAI_MODELS,
     SCHEDULE_HOUR, SCHEDULE_MINUTE, TIMEZONE, EMAIL_ENABLED,
-    ANTHROPIC_API_KEY, OPENAI_API_KEY, TAVILY_API_KEY,
-    TWITTER_BEARER_TOKEN, SMTP_PASSWORD,
+    ANTHROPIC_API_KEY, OPENAI_API_KEY, TAVILY_API_KEY, TAVILY_API_KEYS_LIST,
+    TWITTER_BEARER_TOKEN, SMTP_PASSWORD, BASE_URL,
 )
 
 # Keys that must NEVER appear in any API response
@@ -45,12 +45,13 @@ def _safe_config() -> dict:
         "keys_configured": {
             "anthropic": bool(ANTHROPIC_API_KEY),
             "openai": bool(OPENAI_API_KEY),
-            "tavily": bool(TAVILY_API_KEY),
+            "tavily": bool(TAVILY_API_KEYS_LIST),
             "twitter": bool(TWITTER_BEARER_TOKEN),
             "smtp": bool(SMTP_PASSWORD),
         },
     }
-from backend.database import init_db, get_db, SessionLocal, AgentRun, AgentStep, NewsArticle, ReportRequest, ArticleFeedback, SourceExclusion, CuratedSource
+from backend.database import init_db, get_db, SessionLocal, AgentRun, AgentStep, NewsArticle, ReportRequest, ArticleFeedback, SourceExclusion, CuratedSource, User, UserSession, EmailPreference, PasswordResetToken
+from backend.services.auth import hash_password, verify_password, create_session, get_current_user, get_current_user_optional
 from urllib.parse import urlparse
 from backend.agents.orchestrator import run_pipeline
 from backend.agents.writer_agent import apply_user_request
@@ -164,6 +165,45 @@ class FeedbackRequest(BaseModel):
     run_id: str = ""
 
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    remember: bool = False
+
+
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    phone: str = ""
+    title: str = ""
+    country: str = ""
+
+
+class EmailPrefRequest(BaseModel):
+    enabled: bool = True
+    frequency: str = "after_run"   # "after_run" | "scheduled"
+    send_hour: int = 7
+    send_minute: int = 0
+    day_of_week: str = "daily"     # "daily" | "mon" | "tue" | ... | "sun"
+    timezone: str = "Africa/Nairobi"
+
+
+class ProfileUpdateRequest(BaseModel):
+    phone: str = ""
+    title: str = ""
+    country: str = ""
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+
 # ── WebSocket ────────────────────────────────────────────────────────────────
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -192,6 +232,230 @@ async def serve_frontend():
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return JSONResponse({"message": "Digital Health Africa AI Agent API", "docs": "/docs"})
+
+
+@app.get("/login")
+async def serve_login():
+    return FileResponse(os.path.join(FRONTEND_DIR, "login.html"))
+
+
+@app.get("/register")
+async def serve_register():
+    return FileResponse(os.path.join(FRONTEND_DIR, "register.html"))
+
+
+@app.get("/forgot-password")
+async def serve_forgot():
+    return FileResponse(os.path.join(FRONTEND_DIR, "forgot-password.html"))
+
+
+@app.get("/reset-password")
+async def serve_reset():
+    return FileResponse(os.path.join(FRONTEND_DIR, "reset-password.html"))
+
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+@app.post("/auth/register")
+async def auth_register(req: RegisterRequest, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == req.email.lower()).first():
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    user = User(
+        full_name=req.full_name.strip(),
+        email=req.email.lower().strip(),
+        phone=req.phone.strip(),
+        title=req.title.strip(),
+        country=req.country.strip(),
+        password_hash=hash_password(req.password),
+        status="active",
+        role="user",
+    )
+    db.add(user)
+    db.commit()
+    return {"message": "Account created successfully."}
+
+
+@app.post("/auth/login")
+async def auth_login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email.lower().strip()).first()
+    if not user or not verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    if user.status == "pending":
+        raise HTTPException(status_code=403, detail="Your account is pending admin approval.")
+    if user.status == "suspended":
+        raise HTTPException(status_code=403, detail="Your account has been suspended. Contact your administrator.")
+    token = create_session(user.id, req.remember, db)
+    user.last_login = datetime.utcnow()
+    db.commit()
+    max_age = 60 * 60 * 24 * (30 if req.remember else 1)
+    response.set_cookie("session", token, max_age=max_age, httponly=True, samesite="lax", path="/")
+    return {"message": "Logged in", "user": {"name": user.full_name, "email": user.email, "role": user.role}}
+
+
+@app.post("/auth/logout")
+async def auth_logout(response: Response, session: Optional[str] = Cookie(None), db: Session = Depends(get_db)):
+    if session:
+        db.query(UserSession).filter(UserSession.token == session).delete()
+        db.commit()
+    response.delete_cookie("session", path="/")
+    return {"message": "Logged out"}
+
+
+@app.post("/auth/forgot-password")
+async def auth_forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    from backend.services.email_service import send_password_reset_email
+    import secrets
+    from datetime import timedelta
+    user = db.query(User).filter(User.email == req.email.lower().strip()).first()
+    if not user:
+        # Don't reveal whether the email exists
+        return {"message": "If that email is registered you will receive a reset link shortly."}
+    # Invalidate any previous unused tokens for this user
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used == False,
+    ).delete()
+    db.commit()
+    token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(reset_token)
+    db.commit()
+    reset_url = f"{BASE_URL}/reset-password?token={token}"
+    await send_password_reset_email(user.email, reset_url)
+    return {"message": "If that email is registered you will receive a reset link shortly."}
+
+
+@app.post("/auth/reset-password")
+async def auth_reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == req.token,
+        PasswordResetToken.used == False,
+        PasswordResetToken.expires_at > datetime.utcnow(),
+    ).first()
+    if not reset_token:
+        raise HTTPException(status_code=400, detail="Reset link is invalid or has expired.")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    from backend.services.auth import hash_password
+    user.password_hash = hash_password(req.password)
+    reset_token.used = True
+    # Invalidate all active sessions so old sessions can't be reused
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
+    db.commit()
+    return {"message": "Password updated successfully. You can now sign in."}
+
+
+@app.get("/auth/me")
+async def auth_me(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "name": current_user.full_name,
+        "email": current_user.email,
+        "phone": current_user.phone or "",
+        "role": current_user.role,
+        "country": current_user.country,
+        "title": current_user.title or "",
+    }
+
+
+@app.put("/api/profile")
+async def update_profile(req: ProfileUpdateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == current_user.id).first()
+    user.phone = req.phone.strip()
+    user.title = req.title.strip()
+    if req.country.strip():
+        user.country = req.country.strip()
+    db.commit()
+    return {"message": "Profile updated", "phone": user.phone, "title": user.title, "country": user.country}
+
+
+# ── Admin: user management ────────────────────────────────────────────────────
+
+@app.get("/api/admin/users")
+async def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    users = db.query(User).order_by(User.created_at.desc()).all()
+    return [{"id": u.id, "name": u.full_name, "email": u.email, "title": u.title,
+             "country": u.country, "status": u.status, "role": u.role,
+             "created_at": u.created_at.isoformat()} for u in users]
+
+
+@app.patch("/api/admin/users/{user_id}/status")
+async def update_user_status(user_id: int, body: dict, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    new_status = body.get("status")
+    if new_status not in ("active", "pending", "suspended"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    user.status = new_status
+    db.commit()
+    return {"message": f"User {user.email} status set to {new_status}"}
+
+
+# ── Email preferences ─────────────────────────────────────────────────────────
+
+_COUNTRY_TZ: dict[str, str] = {
+    "Kenya": "Africa/Nairobi", "Tanzania": "Africa/Nairobi", "Uganda": "Africa/Nairobi",
+    "Rwanda": "Africa/Nairobi", "Ethiopia": "Africa/Nairobi",
+    "Nigeria": "Africa/Lagos", "Senegal": "Africa/Lagos",
+    "Ghana": "Africa/Accra", "Sierra Leone": "Africa/Accra",
+    "South Africa": "Africa/Johannesburg", "Zambia": "Africa/Johannesburg",
+    "Malawi": "Africa/Johannesburg", "Zimbabwe": "Africa/Johannesburg",
+    "India": "Asia/Kolkata", "Nepal": "Asia/Kolkata",
+    "Bangladesh": "Asia/Dhaka", "Bhutan": "Asia/Dhaka",
+    "Pakistan": "Asia/Karachi",
+    "Saudi Arabia": "Asia/Riyadh",
+    "United States": "America/New_York",
+    "United Kingdom": "Europe/London",
+    "Netherlands": "Europe/Amsterdam", "Switzerland": "Europe/Amsterdam",
+}
+
+def _country_to_tz(country: str) -> str:
+    return _COUNTRY_TZ.get(country, "Africa/Nairobi")
+
+
+@app.get("/api/email-preferences")
+async def get_email_prefs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    prefs = db.query(EmailPreference).filter(EmailPreference.user_id == current_user.id).first()
+    if not prefs:
+        # Return disabled defaults — user must explicitly opt in
+        tz = current_user.country and _country_to_tz(current_user.country) or "Africa/Nairobi"
+        return {"enabled": False, "frequency": "after_run", "send_hour": 7,
+                "send_minute": 0, "day_of_week": "daily", "timezone": tz}
+    return {"enabled": prefs.enabled, "frequency": prefs.frequency,
+            "send_hour": prefs.send_hour, "send_minute": prefs.send_minute,
+            "day_of_week": prefs.day_of_week, "timezone": prefs.timezone}
+
+
+@app.put("/api/email-preferences")
+async def save_email_prefs(req: EmailPrefRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    prefs = db.query(EmailPreference).filter(EmailPreference.user_id == current_user.id).first()
+    if prefs:
+        prefs.enabled = req.enabled; prefs.frequency = req.frequency
+        prefs.send_hour = req.send_hour; prefs.send_minute = req.send_minute
+        prefs.day_of_week = req.day_of_week; prefs.timezone = req.timezone
+        prefs.updated_at = datetime.utcnow()
+    else:
+        prefs = EmailPreference(user_id=current_user.id, enabled=req.enabled,
+                                frequency=req.frequency, send_hour=req.send_hour,
+                                send_minute=req.send_minute, day_of_week=req.day_of_week,
+                                timezone=req.timezone)
+        db.add(prefs)
+    db.commit()
+    return {"message": "Email preferences saved"}
 
 
 @app.get("/api/config")

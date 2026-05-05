@@ -35,6 +35,14 @@ WRITER_MODEL   = os.getenv("WRITER_MODEL",   "balanced")
 # =============================================================================
 
 TAVILY_API_KEY       = os.getenv("TAVILY_API_KEY", "")
+# TAVILY_API_KEYS — comma-separated list of keys; the scraper cycles to the next when one is quota-exhausted.
+# If unset, falls back to the single TAVILY_API_KEY above.
+_tavily_keys_raw     = os.getenv("TAVILY_API_KEYS", "")
+TAVILY_API_KEYS_LIST: list[str] = (
+    [k.strip() for k in _tavily_keys_raw.split(",") if k.strip()]
+    if _tavily_keys_raw
+    else ([TAVILY_API_KEY] if TAVILY_API_KEY else [])
+)
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
 SERPER_API_KEY       = os.getenv("SERPER_API_KEY", "")
 GITHUB_TOKEN         = os.getenv("GITHUB_TOKEN", "")           # NEW: GitHub API (60 req/hr unauth → 5000 auth)
@@ -61,6 +69,7 @@ SMTP_USER     = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 EMAIL_FROM    = os.getenv("EMAIL_FROM", "")
 EMAIL_TO      = os.getenv("EMAIL_TO", "")
+BASE_URL      = os.getenv("BASE_URL", "http://localhost:8000")
 
 # =============================================================================
 # DATABASE & OUTPUT

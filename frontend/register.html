@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Request access — Medtronic Labs Digital Health Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..900;1,14..32,300..900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:linear-gradient(135deg,#EEF0FB 0%,#F8F9FF 45%,#E8F8F5 100%);color:#0D1117}
+input,button,select,textarea{font-family:inherit}
+
+.brand{display:flex;align-items:center;gap:10px;padding:24px 32px}
+.brand-logo{height:32px;width:auto;object-fit:contain}
+.brand-div{width:1px;height:22px;background:#E5E7EB;flex-shrink:0}
+.brand-sub{font-size:12px;font-weight:400;color:#6B7280}
+
+.page-center{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:8px 16px 32px}
+.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(75,72,229,.08),0 1px 4px rgba(0,0,0,.06);padding:36px 44px;width:100%;max-width:580px}
+.card-title{font-size:22px;font-weight:700;color:#0D1117;margin-bottom:6px}
+.card-sub{font-size:13px;color:#6B7280;margin-bottom:26px}
+
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:5px}
+.field input,.field select{width:100%;padding:11px 14px;border:1.5px solid #E5E7EB;border-radius:8px;font-size:14px;color:#0D1117;background:#FAFAFA;transition:border-color .15s,background .15s;outline:none;appearance:none}
+.field select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236B7280'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
+.field input:focus,.field select:focus{border-color:#4B48E5;background:#fff}
+.field input::placeholder{color:#9CA3AF}
+.field input[type=password]{letter-spacing:.05em}
+.field input[type=password]::placeholder{letter-spacing:normal}
+
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:500px){.row2{grid-template-columns:1fr}}
+
+.consent-box{border:1.5px solid #E5E7EB;border-radius:8px;padding:14px 16px;margin-bottom:20px;background:#FAFAFA}
+.consent-label{display:flex;align-items:flex-start;gap:10px;font-size:13px;color:#374151;cursor:pointer;line-height:1.5}
+.consent-label input[type=checkbox]{width:15px;height:15px;accent-color:#4B48E5;cursor:pointer;flex-shrink:0;margin-top:2px}
+.consent-label strong{font-weight:600;color:#0D1117}
+
+.btn-primary{width:100%;padding:13px;background:#4B48E5;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-primary:hover{background:#3B38D5}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+
+.card-footer{margin-top:20px;text-align:center;font-size:13px;color:#6B7280}
+.card-footer a{color:#4B48E5;font-weight:500;text-decoration:none}
+.card-footer a:hover{text-decoration:underline}
+
+.error-msg{background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:10px 13px;font-size:13px;margin-bottom:16px;display:none}
+.success-msg{background:#F0FDF4;border:1px solid #BBF7D0;color:#15803D;border-radius:6px;padding:16px;font-size:14px;text-align:center;display:none}
+.success-msg strong{display:block;font-size:16px;margin-bottom:4px}
+
+.hint{font-size:11.5px;color:#9CA3AF;margin-top:4px}
+.page-footer{text-align:center;padding:16px;font-size:11.5px;color:#9CA3AF}
+</style>
+</head>
+<body>
+
+<div class="brand">
+  <img src="/public/MDT Main Logo.png" alt="Medtronic Labs" class="brand-logo">
+  <div class="brand-div"></div>
+  <span class="brand-sub">Digital Health Scanner</span>
+</div>
+
+<div class="page-center">
+  <div class="card">
+    <div class="card-title">Create an account</div>
+    <div class="card-sub">Fill in your details to get started.</div>
+
+    <div class="error-msg" id="error-msg"></div>
+    <div class="success-msg" id="success-msg">
+      <strong>Account created!</strong>
+      You can now sign in with your email and password.
+    </div>
+
+    <form id="reg-form" onsubmit="handleRegister(event)">
+      <div class="field">
+        <label>Full name</label>
+        <input type="text" id="full_name" placeholder="Jane Doe" required autocomplete="name"/>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Title / Position</label>
+          <input type="text" id="title" placeholder="Program Manager" required/>
+        </div>
+        <div class="field">
+          <label>Phone number</label>
+          <input type="tel" id="phone" placeholder="+254 700 000 000"/>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Country</label>
+          <select id="country" required>
+            <option value="">Select country</option>
+            <option>Kenya</option>
+            <option>Rwanda</option>
+            <option>Ghana</option>
+            <option>Sierra Leone</option>
+            <option>Tanzania</option>
+            <option>Uganda</option>
+            <option>Ethiopia</option>
+            <option>Nigeria</option>
+            <option>Senegal</option>
+            <option>Zambia</option>
+            <option>Malawi</option>
+            <option>Zimbabwe</option>
+            <option>South Africa</option>
+            <option>Bangladesh</option>
+            <option>India</option>
+            <option>Bhutan</option>
+            <option>Nepal</option>
+            <option>Pakistan</option>
+            <option>Saudi Arabia</option>
+            <option>United States</option>
+            <option>United Kingdom</option>
+            <option>Netherlands</option>
+            <option>Switzerland</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Work email</label>
+          <input type="email" id="email" placeholder="you@medtroniclabs.org" required autocomplete="email"/>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="password" placeholder="At least 8 characters" required autocomplete="new-password"/>
+          <div class="hint">Min 8 characters, at least one number</div>
+        </div>
+        <div class="field">
+          <label>Confirm password</label>
+          <input type="password" id="confirm_password" placeholder="Re-enter password" required autocomplete="new-password"/>
+        </div>
+      </div>
+
+      <div class="consent-box">
+        <label class="consent-label">
+          <input type="checkbox" id="consent" required/>
+          I consent to Medtronic Labs storing my details for portal access.
+        </label>
+      </div>
+
+      <button type="submit" class="btn-primary" id="submit-btn">
+        Create account &nbsp;→
+      </button>
+    </form>
+
+    <div class="card-footer">
+      Already have an account? <a href="/login">Sign in</a>
+    </div>
+  </div>
+</div>
+
+<div class="page-footer">
+  Version: v1.0.0 &nbsp;·&nbsp; © Medtronic LABS. All rights reserved
+</div>
+
+<script>
+async function handleRegister(e) {
+  e.preventDefault();
+  const err = document.getElementById('error-msg');
+  const suc = document.getElementById('success-msg');
+  const btn = document.getElementById('submit-btn');
+  err.style.display = 'none';
+
+  const pw  = document.getElementById('password').value;
+  const cpw = document.getElementById('confirm_password').value;
+
+  if (pw.length < 8)               { showErr('Password must be at least 8 characters.'); return; }
+  if (!/\d/.test(pw))              { showErr('Password must contain at least one number.'); return; }
+  if (pw !== cpw)                  { showErr('Passwords do not match.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+
+  const body = {
+    full_name: document.getElementById('full_name').value.trim(),
+    title:     document.getElementById('title').value.trim(),
+    phone:     document.getElementById('phone').value.trim(),
+    country:   document.getElementById('country').value,
+    email:     document.getElementById('email').value.trim(),
+    password:  pw,
+  };
+
+  try {
+    const r = await fetch('/auth/register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (r.ok) {
+      document.getElementById('reg-form').style.display = 'none';
+      suc.style.display = 'block';
+      setTimeout(() => { window.location.href = '/login'; }, 2500);
+    } else {
+      const d = await r.json();
+      showErr(d.detail || 'Registration failed. Please try again.');
+    }
+  } catch {
+    showErr('Network error — please try again.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Create account &nbsp;→';
+  }
+}
+
+function showErr(msg) {
+  const el = document.getElementById('error-msg');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+</script>
+</body>
+</html>

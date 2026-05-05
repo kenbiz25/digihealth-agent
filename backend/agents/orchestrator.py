@@ -8,14 +8,14 @@ from datetime import datetime, timedelta
 from typing import Callable, Any
 from sqlalchemy.orm import Session
 
-from backend.database import AgentRun, AgentStep, NewsArticle, SessionLocal, SourceExclusion
+from backend.database import AgentRun, AgentStep, NewsArticle, SessionLocal, SourceExclusion, EmailPreference, User
 from backend.agents.scraper_agent import run_scraper
 from backend.agents.verifier_agent import run_verifier
 from backend.agents.enricher_agent import run_enricher
 from backend.agents.impact_agent import run_impact_agent
 from backend.agents.writer_agent import run_writer
 from backend.services.pdf_service import generate_pdf
-from backend.services.email_service import send_email
+from backend.services.email_service import send_email, send_digest_summary_email
 from backend.config import AI_PROVIDER, EMAIL_ENABLED
 
 
@@ -419,24 +419,84 @@ async def run_pipeline(
                     "data": {"pdf_path": pdf_path}})
 
         # ─── STEP 6: EMAIL ───────────────────────────────────────────
-        # Only send email on scheduled (Monday) runs, not manual runs
         update_step(db, run_id, "email_sender", "running")
-        if EMAIL_ENABLED and trigger == "scheduled":
-            await emit({"step": "email_sender", "status": "running", "message": "Sending Monday brief via email..."})
-            email_sent = await send_email(pdf_path, report["title"])
+        if trigger == "scheduled":
+            await emit({"step": "email_sender", "status": "running", "message": "Sending digest emails..."})
+            sent_count = 0
+            today_abbr = datetime.utcnow().strftime("%a").lower()  # "mon", "tue", …
+
+            def _user_wants_email_today(pref: EmailPreference) -> bool:
+                if pref.frequency == "after_run":
+                    return True
+                # "scheduled" — check if today is in the user's selected days
+                days = {d.strip() for d in (pref.day_of_week or "daily").split(",")}
+                return "daily" in days or today_abbr in days
+
+            # Build run metadata and article list for the digest email
+            scope_countries = list(country_filters) if country_filters else (
+                [country_filter] if country_filter else []
+            )
+            run_meta = {
+                "trigger":   trigger,
+                "countries": scope_countries,
+                "run_date":  run.started_at.strftime("%B %d, %Y") if run.started_at else "",
+                "next_run":  "",  # scheduler not imported here; omit
+            }
+            # Fetch verified articles for this run to include in digest
+            digest_articles = [
+                {
+                    "title":             a.title,
+                    "url":               a.url,
+                    "source_name":       a.source_name,
+                    "impact_level":      a.impact_level,
+                    "executive_headline":a.executive_headline,
+                    "summary":           a.summary,
+                    "countries_mentioned":a.countries_mentioned or [],
+                }
+                for a in db.query(NewsArticle).filter(
+                    NewsArticle.run_id == run_id,
+                    NewsArticle.verified == True,
+                ).all()
+            ]
+            prefs = db.query(EmailPreference).filter(EmailPreference.enabled == True).all()
+            for pref in prefs:
+                if not _user_wants_email_today(pref):
+                    continue
+                user = db.query(User).filter(User.id == pref.user_id, User.status == "active").first()
+                if user:
+                    ok = await send_digest_summary_email(
+                        to_email=user.email,
+                        articles=digest_articles,
+                        run_meta=run_meta,
+                        pdf_path=pdf_path,
+                    )
+                    if ok:
+                        sent_count += 1
+            # Fallback: if no per-user prefs configured, send to global EMAIL_TO
+            if not prefs and EMAIL_ENABLED:
+                from backend.config import EMAIL_TO
+                if EMAIL_TO:
+                    ok = await send_digest_summary_email(
+                        to_email=EMAIL_TO,
+                        articles=digest_articles,
+                        run_meta=run_meta,
+                        pdf_path=pdf_path,
+                    )
+                    if ok:
+                        sent_count += 1
+            email_sent = sent_count > 0
             run.email_sent = email_sent
             db.commit()
             update_step(db, run_id, "email_sender",
                         "completed" if email_sent else "failed",
-                        output={"sent": email_sent})
+                        output={"sent": email_sent, "recipients": sent_count})
             await emit({"step": "email_sender", "status": "completed" if email_sent else "failed",
-                        "message": "Email sent" if email_sent else "Email failed"})
+                        "message": f"Email sent to {sent_count} recipient(s)" if email_sent else "No email sent"})
         else:
-            reason = "manual run — email only sent on scheduled Monday runs" if trigger != "scheduled" else "EMAIL_ENABLED=false"
             update_step(db, run_id, "email_sender", "completed",
-                        output={"skipped": True, "reason": reason})
+                        output={"skipped": True, "reason": "manual run"})
             await emit({"step": "email_sender", "status": "completed",
-                        "message": f"Email skipped ({reason})"})
+                        "message": "Email skipped (manual run)"})
 
         # Finalize run
         run.status = "completed"

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sign in — Medtronic Labs Digital Health Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..900;1,14..32,300..900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:linear-gradient(135deg,#EEF0FB 0%,#F8F9FF 45%,#E8F8F5 100%);color:#0D1117}
+input,button,select,textarea{font-family:inherit}
+
+/* ── Brand bar ── */
+.brand{display:flex;align-items:center;gap:10px;padding:24px 32px}
+.brand-logo{height:32px;width:auto;object-fit:contain}
+.brand-div{width:1px;height:22px;background:#E5E7EB;flex-shrink:0}
+.brand-sub{font-size:12px;font-weight:400;color:#6B7280}
+
+/* ── Card ── */
+.page-center{flex:1;display:flex;align-items:center;justify-content:center;padding:16px}
+.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(75,72,229,.08),0 1px 4px rgba(0,0,0,.06);padding:40px 44px;width:100%;max-width:480px}
+.card-title{font-size:18px;font-weight:600;color:#0D1117;margin-bottom:28px;text-align:center}
+
+/* ── Form ── */
+.field{margin-bottom:18px}
+.field label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px}
+.field input{width:100%;padding:11px 14px;border:1.5px solid #E5E7EB;border-radius:8px;font-size:14px;color:#0D1117;background:#FAFAFA;transition:border-color .15s,background .15s;outline:none}
+.field input:focus{border-color:#4B48E5;background:#fff}
+.field input::placeholder{color:#9CA3AF}
+
+.row-check{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
+.check-label{display:flex;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer}
+.check-label input[type=checkbox]{width:15px;height:15px;accent-color:#4B48E5;cursor:pointer}
+.forgot{font-size:13px;color:#4B48E5;text-decoration:none;font-weight:500}
+.forgot:hover{text-decoration:underline}
+
+.btn-primary{width:100%;padding:13px;background:#4B48E5;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:background .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-primary:hover{background:#3B38D5}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+
+.card-footer{margin-top:22px;text-align:center;font-size:13px;color:#6B7280}
+.card-footer a{color:#4B48E5;font-weight:500;text-decoration:none}
+.card-footer a:hover{text-decoration:underline}
+
+.error-msg{background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;border-radius:6px;padding:10px 13px;font-size:13px;margin-bottom:16px;display:none}
+
+/* ── Footer ── */
+.page-footer{text-align:center;padding:16px;font-size:11.5px;color:#9CA3AF}
+</style>
+</head>
+<body>
+
+<div class="brand">
+  <img src="/public/MDT Main Logo.png" alt="Medtronic Labs" class="brand-logo">
+  <div class="brand-div"></div>
+  <span class="brand-sub">Digital Health Scanner</span>
+</div>
+
+<div class="page-center">
+  <div class="card">
+    <div class="card-title">Sign in</div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <form id="login-form" onsubmit="handleLogin(event)">
+      <div class="field">
+        <label for="email">Work email</label>
+        <input type="email" id="email" name="email" placeholder="you@medtroniclabs.org" required autocomplete="email"/>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Enter password" required autocomplete="current-password"/>
+      </div>
+      <div class="row-check">
+        <label class="check-label">
+          <input type="checkbox" id="remember" checked/>
+          Remember me
+        </label>
+        <a href="/forgot-password" class="forgot">Forgot password?</a>
+      </div>
+      <button type="submit" class="btn-primary" id="submit-btn">
+        Sign in &nbsp;→
+      </button>
+    </form>
+
+    <div class="card-footer">
+      Need access? <a href="/register">Request an account</a>
+    </div>
+  </div>
+</div>
+
+<div class="page-footer">
+  Version: v1.0.0 &nbsp;·&nbsp; © Medtronic LABS. All rights reserved
+</div>
+
+<script>
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submit-btn');
+  const err = document.getElementById('error-msg');
+  err.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+
+  const body = {
+    email:    document.getElementById('email').value.trim(),
+    password: document.getElementById('password').value,
+    remember: document.getElementById('remember').checked,
+  };
+
+  try {
+    const r = await fetch('/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+      credentials: 'include',
+    });
+    if (r.ok) {
+      window.location.href = '/';
+    } else {
+      const d = await r.json();
+      err.textContent = d.detail || 'Invalid email or password.';
+      err.style.display = 'block';
+    }
+  } catch {
+    err.textContent = 'Network error — please try again.';
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Sign in &nbsp;→';
+  }
+}
+
+// If already authenticated, skip login
+(async () => {
+  try {
+    const r = await fetch('/auth/me', {credentials: 'include'});
+    if (r.ok) window.location.href = '/';
+  } catch {}
+})();
+</script>
+</body>
+</html>
